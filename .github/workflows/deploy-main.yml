@@ -136,7 +136,7 @@ jobs:
         env:
           APP_ENV: production
           APP_DEBUG: false
-          CACHE_DRIVER=file
+          CACHE_DRIVER: file
           DB_CONNECTION: pgsql
           DB_HOST: db-dmc-dev.postgres.database.azure.com
           DB_PORT: 5432
