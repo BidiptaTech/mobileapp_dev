@@ -90,21 +90,7 @@ jobs:
           php artisan view:cache
           echo "✅ Laravel optimized for production"
 
-      # 8️⃣ Verify PostgreSQL connectivity
-      - name: 🧪 Verify PostgreSQL Connectivity (SSL)
-        run: |
-          php -r "
-          \$dsn = 'pgsql:host=${{ secrets.DB_HOST }};port=${{ secrets.DB_PORT }};dbname=${{ secrets.DB_DATABASE }};sslmode=require';
-          try {
-            new PDO(\$dsn, '${{ secrets.DB_USERNAME }}', '${{ secrets.DB_PASSWORD }}');
-            echo '✅ PostgreSQL SSL connection successful.';
-          } catch (Exception \$e) {
-            echo '❌ PostgreSQL connection failed: ' . \$e->getMessage();
-            exit(1);
-          }"
-        shell: bash
-
-      # 9️⃣ Prepare deployment package
+      # 8️⃣ Prepare deployment package
       - name: 📁 Build Deployment Package
         run: |
           echo "📦 Preparing deployment..."
@@ -126,7 +112,7 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # 10️⃣ Deploy Laravel to Azure
+      # 9️⃣ Deploy Laravel to Azure
       - name: 🚀 Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
@@ -134,7 +120,7 @@ jobs:
           slot-name: 'Production'
           package: ./app.zip
 
-      # 11️⃣ Clear & optimize Laravel after deployment
+      # 🔟 Clear & optimize Laravel after deployment
       - name: 🔄 Clear and Optimize Laravel
         run: |
           echo "🔧 Running Laravel cache & optimization commands..."
@@ -146,6 +132,6 @@ jobs:
           php artisan optimize:clear
           echo "✅ Laravel cache cleared and optimized"
 
-      # 12️⃣ Restart Azure Web App
+      # 1️⃣1️⃣ Restart Azure Web App
       - name: 🔄 Restart Azure Web App
         run: az webapp restart --resource-group rg-dmc-mobile-dev --name dmc-mobile-dev
