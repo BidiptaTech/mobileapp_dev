@@ -14,6 +14,9 @@ jobs:
   deploy:
     name: 🌐 Laravel MAIN Deployment
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
 
     env:
       PHP_VERSION: '8.4'
@@ -38,16 +41,44 @@ jobs:
           mv composer.phar /usr/local/bin/composer
 
       - name: 📦 Install Dependencies
-        run: composer install --prefer-dist --no-dev --optimize-autoloader
+        run: |
+          composer install --prefer-dist --no-dev --optimize-autoloader
+
+      - name: 🧱 Create startup.sh
+        run: |
+          echo "🧩 Creating startup.sh..."
+          cat << 'EOF' > startup.sh
+          #!/bin/bash
+          echo "🔧 Configuring Laravel app for Azure..."
+
+          # Ensure NGINX configuration exists
+          if [ -f /home/site/wwwroot/default ]; then
+            cp /home/site/wwwroot/default /etc/nginx/sites-available/default
+            cp /home/site/wwwroot/default /etc/nginx/sites-enabled/default
+            echo "✅ Custom NGINX config applied"
+          else
+            echo "⚠️ No custom default found — using system default"
+          fi
+
+          # Ensure storage and cache directories
+          mkdir -p /home/site/wwwroot/storage/framework/{cache,sessions,views}
+          mkdir -p /home/site/wwwroot/storage/logs
+          chmod -R 777 /home/site/wwwroot/storage /home/site/wwwroot/bootstrap/cache
+
+          # Restart PHP-FPM & NGINX
+          service php8.2-fpm restart
+          service nginx restart
+
+          echo "✅ Laravel app ready!"
+          EOF
+          chmod +x startup.sh
+          echo "✅ startup.sh created successfully."
 
       - name: 📁 Prepare Deployment Package
         run: |
           mkdir -p deployment
           rsync -av --progress --exclude 'deployment' ./ ./deployment/
-          cd deployment
-          zip -r ../app.zip .
-          cd ..
-          echo "✅ Deployment ZIP ready"
+          echo "✅ Deployment package prepared"
 
       - name: 🔐 Azure Login
         uses: azure/login@v2
@@ -94,49 +125,44 @@ jobs:
           AZURE_STORAGE_NAME=stgdmcappdev \
           AZURE_STORAGE_KEY="${{ secrets.AZURE_STORAGE_KEY }}" \
           AZURE_STORAGE_CONTAINER=uploads \
-          AZURE_STORAGE_ENDPOINT=https://stgdmcappdev.blob.core.windows.net/
+          AZURE_STORAGE_ENDPOINT=https://stgdmcappdev.blob.core.windows.net/ \
+          STARTUP_COMMAND="bash startup.sh"
 
-      - name: 🚀 Deploy via CLI (more reliable)
+      - name: ⚙️ Upload startup.sh to Azure
         run: |
-          echo "📦 Deploying Laravel app via Azure CLI..."
-          az webapp deploy \
+          echo "📤 Uploading startup.sh to Azure Web App..."
+          az webapp config set \
             --resource-group rg-dmc-mobile-dev \
             --name rg-dmc-mobile-dev \
-            --src-path app.zip \
-            --type zip \
-            --async false
-          echo "✅ Laravel app deployed successfully!"
+            --startup-file "bash startup.sh"
+          echo "✅ startup.sh configured successfully!"
 
-      - name: 🔄 Post-Deployment Laravel Setup
+      - name: 🚀 Deploy to Azure Web App
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: 'rg-dmc-mobile-dev'
+          slot-name: 'Production'
+          package: ./deployment
+
+      - name: 🔄 Prepare Laravel Storage & Permissions
         run: |
-          echo "📂 Preparing storage and cache..."
+          echo "📂 Setting up storage folders..."
           mkdir -p storage/framework/{cache,sessions,views}
           mkdir -p storage/logs
           chmod -R 777 storage bootstrap/cache
-          php artisan migrate --force || true
-          php artisan cache:table || true
-          php artisan migrate --force || true
-          php artisan storage:link || true
-          echo "✅ Storage, cache and migration setup complete"
+          echo "✅ Storage directories ready"
         env:
           APP_ENV: production
-          DB_CONNECTION: pgsql
-          DB_HOST: db-dmc-dev.postgres.database.azure.com
-          DB_PORT: 5432
-          DB_DATABASE: travclicks_db_dev
-          DB_USERNAME: travadm_pg_dev
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
 
-      - name: ⚙️ Clear and Optimize Laravel
+      - name: ⚙️ Clear and Optimize Laravel (File Cache Only)
         run: |
           echo "🔧 Running Laravel optimization..."
           php artisan config:clear
-          php artisan cache:clear
-          php artisan route:clear
           php artisan view:clear
+          php artisan route:clear
           php artisan clear-compiled
-          php artisan optimize
-          echo "✅ Laravel cache cleared and optimized"
+          php artisan optimize:clear
+          echo "✅ Laravel optimized successfully (file cache)"
         env:
           APP_ENV: production
           APP_DEBUG: false
@@ -155,4 +181,4 @@ jobs:
         run: |
           echo "🌍 Checking if site is live..."
           sleep 30
-          curl -f https://mobiledev.travclicks.com/ || echo "Laravel app may still be starting"
+          curl -f https://mobiledev.travclicks.com/ || echo "⚠️ Laravel app may still be starting up"
