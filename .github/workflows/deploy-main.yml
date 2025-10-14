@@ -73,84 +73,85 @@ jobs:
       - name: ⚙️ Create startup.sh
         run: |
           cat > startup.sh << 'EOF'
-#!/bin/bash
-echo "🔧 Laravel root-path setup on Azure Web App..."
+          #!/bin/bash
+          echo "🔧 Laravel root-path setup on Azure Web App..."
 
-APP_DIR="/home/site/wwwroot"
+          APP_DIR="/home/site/wwwroot"
 
-# --- Set Laravel directories & permissions ---
-mkdir -p $APP_DIR/storage/framework/{sessions,views,cache/data}
-mkdir -p $APP_DIR/storage/{logs,app/public} $APP_DIR/bootstrap/cache
-chmod -R 775 $APP_DIR/storage $APP_DIR/bootstrap/cache
+          # --- Set Laravel directories & permissions ---
+          mkdir -p $APP_DIR/storage/framework/{sessions,views,cache/data}
+          mkdir -p $APP_DIR/storage/{logs,app/public} $APP_DIR/bootstrap/cache
+          chmod -R 775 $APP_DIR/storage $APP_DIR/bootstrap/cache
+          
+          cd $APP_DIR || exit 1
+          
+          # --- Write environment variables dynamically ---
+          cat > .env << ENV_EOF
+          APP_NAME=Travclicks
+          APP_ENV=production
+          APP_KEY=${APP_KEY}
+          APP_DEBUG=false
+          APP_URL=https://mobiledev.travclicks.com/
+          LOG_CHANNEL=stack
+          LOG_LEVEL=debug
+          DB_CONNECTION=pgsql
+          DB_HOST=db-dmc-dev.postgres.database.azure.com
+          DB_PORT=5432
+          DB_DATABASE=travclicks_db_dev
+          DB_USERNAME=travadm_pg_dev
+          DB_PASSWORD=${DB_PASSWORD}
+          BROADCAST_DRIVER=log
+          CACHE_DRIVER=file
+          FILESYSTEM_DISK=local
+          QUEUE_CONNECTION=sync
+          SESSION_DRIVER=file
+          SESSION_LIFETIME=120
+          REDIS_HOST=127.0.0.1
+          MAIL_MAILER=smtp
+          MAIL_HOST=smtp.hostinger.com
+          MAIL_PORT=465
+          MAIL_USERNAME=admin@travclicks.com
+          MAIL_PASSWORD=${MAIL_PASSWORD}
+          MAIL_ENCRYPTION=SSL
+          MAIL_FROM_ADDRESS=admin@travclicks.com
+          MAIL_FROM_NAME=Travclicks
+          AWS_DEFAULT_REGION=us-east-1
+          AZURE_STORAGE_NAME=stgdmcappdev
+          AZURE_STORAGE_KEY=${AZURE_STORAGE_KEY}
+          AZURE_STORAGE_CONTAINER=uploads
+          AZURE_STORAGE_ENDPOINT=https://stgdmcappdev.blob.core.windows.net/
+          ENV_EOF
+          
+          # --- Laravel key ---
+          if ! grep -q "APP_KEY=base64:" .env 2>/dev/null; then
+              echo "🔑 Generating Laravel APP_KEY..."
+              php artisan key:generate --force || true
+          fi
+          
+          # --- Clear and optimize Laravel caches ---
+          php artisan cache:clear || true
+          php artisan config:clear || true
+          php artisan route:clear || true
+          php artisan view:clear || true
+          php artisan optimize || true
+          php artisan config:cache || true
+          php artisan route:cache || true
+          php artisan view:cache || true
+          
+          # --- Create storage symlink ---
+          php artisan storage:link || true
+          
+          # --- NGINX reload if custom default exists ---
+          if [ -f "$APP_DIR/default" ]; then
+              cp $APP_DIR/default /etc/nginx/sites-available/default
+              cp /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
+              nginx -t && service nginx reload || echo "NGINX reload failed"
+          fi
+          
+          echo "🎯 Laravel app ready at root, caches cleared, permissions set"
+          EOF
+                    chmod +x startup.sh
 
-cd $APP_DIR || exit 1
-
-# --- Write environment variables dynamically ---
-cat > .env << ENV_EOF
-APP_NAME=Travclicks
-APP_ENV=production
-APP_KEY=${APP_KEY}
-APP_DEBUG=false
-APP_URL=https://mobiledev.travclicks.com/
-LOG_CHANNEL=stack
-LOG_LEVEL=debug
-DB_CONNECTION=pgsql
-DB_HOST=db-dmc-dev.postgres.database.azure.com
-DB_PORT=5432
-DB_DATABASE=travclicks_db_dev
-DB_USERNAME=travadm_pg_dev
-DB_PASSWORD=${DB_PASSWORD}
-BROADCAST_DRIVER=log
-CACHE_DRIVER=file
-FILESYSTEM_DISK=local
-QUEUE_CONNECTION=sync
-SESSION_DRIVER=file
-SESSION_LIFETIME=120
-REDIS_HOST=127.0.0.1
-MAIL_MAILER=smtp
-MAIL_HOST=smtp.hostinger.com
-MAIL_PORT=465
-MAIL_USERNAME=admin@travclicks.com
-MAIL_PASSWORD=${MAIL_PASSWORD}
-MAIL_ENCRYPTION=SSL
-MAIL_FROM_ADDRESS=admin@travclicks.com
-MAIL_FROM_NAME=Travclicks
-AWS_DEFAULT_REGION=us-east-1
-AZURE_STORAGE_NAME=stgdmcappdev
-AZURE_STORAGE_KEY=${AZURE_STORAGE_KEY}
-AZURE_STORAGE_CONTAINER=uploads
-AZURE_STORAGE_ENDPOINT=https://stgdmcappdev.blob.core.windows.net/
-ENV_EOF
-
-# --- Laravel key ---
-if ! grep -q "APP_KEY=base64:" .env 2>/dev/null; then
-    echo "🔑 Generating Laravel APP_KEY..."
-    php artisan key:generate --force || true
-fi
-
-# --- Clear and optimize Laravel caches ---
-php artisan cache:clear || true
-php artisan config:clear || true
-php artisan route:clear || true
-php artisan view:clear || true
-php artisan optimize || true
-php artisan config:cache || true
-php artisan route:cache || true
-php artisan view:cache || true
-
-# --- Create storage symlink ---
-php artisan storage:link || true
-
-# --- NGINX reload if custom default exists ---
-if [ -f "$APP_DIR/default" ]; then
-    cp $APP_DIR/default /etc/nginx/sites-available/default
-    cp /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
-    nginx -t && service nginx reload || echo "NGINX reload failed"
-fi
-
-echo "🎯 Laravel app ready at root, caches cleared, permissions set"
-EOF
-          chmod +x startup.sh
 
       # 9️⃣ Upload and run startup.sh
       - name: 📄 Upload and run startup script
