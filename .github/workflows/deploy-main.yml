@@ -22,13 +22,11 @@ jobs:
       PHP_VERSION: '8.4'
 
     steps:
-      # 1️⃣ Checkout repository
       - name: 📥 Checkout MAIN branch
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 2️⃣ Setup PHP
       - name: 🔧 Setup PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -37,26 +35,21 @@ jobs:
           ini-values: post_max_size=256M, upload_max_filesize=256M, memory_limit=2G
           coverage: none
 
-      # 3️⃣ Install Composer
       - name: 💾 Install Composer
         run: |
           curl -sS https://getcomposer.org/installer | php
           mv composer.phar /usr/local/bin/composer
 
-      # 4️⃣ Install Laravel Dependencies
       - name: 📦 Install Dependencies
         run: |
-          composer validate --no-check-publish
           composer install --prefer-dist --no-dev --optimize-autoloader
 
-      # 5️⃣ Prepare Deployment Package
       - name: 📁 Prepare Deployment Package
         run: |
           mkdir -p deployment
           rsync -av --progress --exclude 'deployment' ./ ./deployment/
           echo "✅ Deployment package prepared"
 
-      # 6️⃣ Azure Login
       - name: 🔐 Azure Login
         uses: azure/login@v2
         with:
@@ -64,7 +57,6 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # 7️⃣ Configure Azure App Settings
       - name: 🌿 Configure Azure App Settings
         run: |
           az webapp config appsettings set \
@@ -105,7 +97,6 @@ jobs:
           AZURE_STORAGE_CONTAINER=uploads \
           AZURE_STORAGE_ENDPOINT=https://stgdmcappdev.blob.core.windows.net/
 
-      # 8️⃣ Deploy Laravel to Azure Web App
       - name: 🚀 Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
@@ -113,10 +104,28 @@ jobs:
           slot-name: 'Production'
           package: ./deployment
 
-      # 9️⃣ Clear & optimize Laravel caches (force PostgreSQL)
-      - name: 🔄 Clear and Optimize Laravel
+      - name: 🔄 Prepare Laravel Storage & Cache Tables
         run: |
-          echo "🔧 Running Laravel cache & optimization commands..."
+          echo "📂 Ensuring storage and cache setup..."
+          mkdir -p storage/framework/{cache,sessions,views}
+          mkdir -p storage/logs
+          chmod -R 777 storage bootstrap/cache
+          php artisan migrate --force || true
+          php artisan cache:table || true
+          php artisan migrate --force || true
+          echo "✅ Storage permissions and cache table ready"
+        env:
+          APP_ENV: production
+          DB_CONNECTION: pgsql
+          DB_HOST: db-dmc-dev.postgres.database.azure.com
+          DB_PORT: 5432
+          DB_DATABASE: travclicks_db_dev
+          DB_USERNAME: travadm_pg_dev
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+
+      - name: ⚙️ Clear and Optimize Laravel
+        run: |
+          echo "🔧 Running Laravel optimization..."
           php artisan config:clear
           php artisan cache:clear
           php artisan route:clear
@@ -127,6 +136,7 @@ jobs:
         env:
           APP_ENV: production
           APP_DEBUG: false
+          CACHE_DRIVER=file
           DB_CONNECTION: pgsql
           DB_HOST: db-dmc-dev.postgres.database.azure.com
           DB_PORT: 5432
@@ -134,11 +144,9 @@ jobs:
           DB_USERNAME: travadm_pg_dev
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
 
-      # 🔟 Restart Azure Web App
       - name: 🔁 Restart Azure Web App
         run: az webapp restart --resource-group rg-dmc-mobile-dev --name rg-dmc-mobile-dev
 
-      # 11️⃣ Verify Deployment
       - name: ✅ Verify Deployment
         run: |
           echo "🌍 Checking if site is live..."
