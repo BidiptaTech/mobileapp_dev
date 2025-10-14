@@ -14,9 +14,6 @@ jobs:
   deploy:
     name: 🌐 Laravel MAIN Deployment
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
 
     env:
       PHP_VERSION: '8.4'
@@ -41,14 +38,16 @@ jobs:
           mv composer.phar /usr/local/bin/composer
 
       - name: 📦 Install Dependencies
-        run: |
-          composer install --prefer-dist --no-dev --optimize-autoloader
+        run: composer install --prefer-dist --no-dev --optimize-autoloader
 
       - name: 📁 Prepare Deployment Package
         run: |
           mkdir -p deployment
           rsync -av --progress --exclude 'deployment' ./ ./deployment/
-          echo "✅ Deployment package prepared"
+          cd deployment
+          zip -r ../app.zip .
+          cd ..
+          echo "✅ Deployment ZIP ready"
 
       - name: 🔐 Azure Login
         uses: azure/login@v2
@@ -97,32 +96,47 @@ jobs:
           AZURE_STORAGE_CONTAINER=uploads \
           AZURE_STORAGE_ENDPOINT=https://stgdmcappdev.blob.core.windows.net/
 
-      - name: 🚀 Deploy to Azure Web App
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: 'rg-dmc-mobile-dev'
-          slot-name: 'Production'
-          package: ./deployment
-
-      - name: 🔄 Prepare Laravel Storage & Permissions
+      - name: 🚀 Deploy via CLI (more reliable)
         run: |
-          echo "📂 Setting up storage folders..."
+          echo "📦 Deploying Laravel app via Azure CLI..."
+          az webapp deploy \
+            --resource-group rg-dmc-mobile-dev \
+            --name rg-dmc-mobile-dev \
+            --src-path app.zip \
+            --type zip \
+            --async false
+          echo "✅ Laravel app deployed successfully!"
+
+      - name: 🔄 Post-Deployment Laravel Setup
+        run: |
+          echo "📂 Preparing storage and cache..."
           mkdir -p storage/framework/{cache,sessions,views}
           mkdir -p storage/logs
           chmod -R 777 storage bootstrap/cache
-          echo "✅ Storage directories ready"
+          php artisan migrate --force || true
+          php artisan cache:table || true
+          php artisan migrate --force || true
+          php artisan storage:link || true
+          echo "✅ Storage, cache and migration setup complete"
         env:
           APP_ENV: production
+          DB_CONNECTION: pgsql
+          DB_HOST: db-dmc-dev.postgres.database.azure.com
+          DB_PORT: 5432
+          DB_DATABASE: travclicks_db_dev
+          DB_USERNAME: travadm_pg_dev
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
 
-      - name: ⚙️ Clear and Optimize Laravel (File Cache Only)
+      - name: ⚙️ Clear and Optimize Laravel
         run: |
           echo "🔧 Running Laravel optimization..."
           php artisan config:clear
-          php artisan view:clear
+          php artisan cache:clear
           php artisan route:clear
+          php artisan view:clear
           php artisan clear-compiled
-          php artisan optimize:clear
-          echo "✅ Laravel optimized successfully (file cache)"
+          php artisan optimize
+          echo "✅ Laravel cache cleared and optimized"
         env:
           APP_ENV: production
           APP_DEBUG: false
