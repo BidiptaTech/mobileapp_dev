@@ -84,31 +84,15 @@ jobs:
           php artisan view:cache
           echo "✅ Laravel optimized for production"
 
-      - name: 🧪 Verify PostgreSQL Connectivity (SSL)
-        run: |
-          php -r "
-          \$dsn = 'pgsql:host=${{ secrets.DB_HOST }};port=${{ secrets.DB_PORT }};dbname=${{ secrets.DB_DATABASE }};sslmode=require';
-          try {
-            new PDO(\$dsn, '${{ secrets.DB_USERNAME }}', '${{ secrets.DB_PASSWORD }}');
-            echo '✅ PostgreSQL SSL connection successful.';
-          } catch (Exception \$e) {
-            echo '❌ PostgreSQL connection failed: ' . \$e->getMessage();
-            exit(1);
-          }"
-        shell: bash
-
       - name: 📁 Build Deployment Package
         run: |
-          echo "📦 Preparing deployment..."
+          echo "📦 Preparing deployment package..."
           mkdir -p deployment
           rsync -av --exclude='.git' --exclude='node_modules' --exclude='tests' --exclude='.github' ./ deployment/
           cp .env deployment/
           [ -f startup.sh ] && cp startup.sh deployment/
           [ -f default ] && cp default deployment/
           [ -f .htaccess ] && cp .htaccess deployment/
-          cd deployment
-          composer install --no-dev --optimize-autoloader --no-interaction
-          cd ..
           cd deployment && zip -r ../app.zip . && cd ..
           echo "✅ app.zip ready for deployment"
 
@@ -142,6 +126,5 @@ jobs:
         run: |
           echo "🎉 Laravel App Deployed Successfully!"
           echo "🌍 URL: https://mobiledev.travclicks.com"
-          echo "🗃️ DB: PostgreSQL (SSL required)"
           echo "📦 Environment: Production"
           echo "✅ All caches cleared & optimized"
