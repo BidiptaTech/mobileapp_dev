@@ -12,26 +12,25 @@ permissions:
 
 jobs:
   deploy:
-    name: 🌐 Laravel MAIN DEV MOBILE Deployment
+    name: 🌐 Laravel Deployment to Azure
     runs-on: ubuntu-latest
     permissions:
       id-token: write
       contents: read
-    
+
     env:
-      PHP_VERSION: '8.2'
       NODE_OPTIONS: '--max-old-space-size=4096'
-      APP_ENV: production
+      PHP_VERSION: '8.2'
       APP_URL: 'https://mobiledev.travclicks.com'
 
     steps:
-      # 1️⃣ Checkout code
+      # 1️⃣ Checkout main branch
       - name: 📥 Checkout main branch
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 2️⃣ Setup PHP with required extensions
+      # 2️⃣ Setup PHP
       - name: 🔧 Setup PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -39,32 +38,53 @@ jobs:
           extensions: mbstring, bcmath, intl, pdo_pgsql, pgsql
           tools: composer
 
-      # 3️⃣ Install Composer dependencies
-      - name: 📦 Install Laravel Dependencies
-        run: |
-          composer validate --no-check-publish
-          composer install --prefer-dist --no-dev --optimize-autoloader
+      # 3️⃣ Setup Node.js (for React, if any frontend)
+      - name: 🧰 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
 
-      # 4️⃣ Prepare Deployment Folder
-      - name: 📁 Prepare Deployment Package
+      # 4️⃣ Install Composer dependencies
+      - name: 📦 Install Laravel dependencies
+        run: |
+          composer install --no-dev --optimize-autoloader --no-interaction
+
+      # 5️⃣ Prepare deployment folder
+      - name: 📁 Prepare Deployment Folder
         run: |
           echo "📦 Preparing deployment folder..."
+          rm -rf deployment
           mkdir -p deployment
           rsync -av --exclude='.git' --exclude='node_modules' --exclude='tests' --exclude='.github' ./ deployment/
           
-          # Copy essential files
+          # Ensure startup.sh and .htaccess are included
           [ -f startup.sh ] && cp startup.sh deployment/
           [ -f .htaccess ] && cp .htaccess deployment/
-          [ -f .env ] && cp .env deployment/ || echo "⚠️ .env not found! Ensure production .env exists"
+          echo "✅ Deployment folder ready"
 
-      # 5️⃣ Laravel Cache & Optimization
-      - name: 🔄 Clear and Optimize Laravel
+      # 6️⃣ Ensure .env exists for Laravel cache/optimization
+      - name: 🔐 Create Temporary .env for CI
+        run: |
+          cd deployment
+          if [ ! -f .env ]; then
+            echo "APP_NAME=LaravelApp" > .env
+            echo "APP_ENV=ci" >> .env
+            echo "APP_KEY=" >> .env
+            echo "APP_DEBUG=false" >> .env
+            echo "DB_CONNECTION=sqlite" >> .env
+            echo "DB_DATABASE=:memory:" >> .env
+            echo "CACHE_DRIVER=file" >> .env
+            echo "SESSION_DRIVER=file" >> .env
+            echo "QUEUE_CONNECTION=sync" >> .env
+          fi
+          cd ..
+
+      # 7️⃣ Clear and optimize Laravel
+      - name: 🔄 Clear & Optimize Laravel
         run: |
           echo "🔧 Running Laravel cache & optimization commands..."
           cd deployment
-          # Use in-memory SQLite for CI optimization to avoid DB errors
-          export DB_CONNECTION=sqlite
-          export DB_DATABASE=:memory:
           php artisan key:generate --force
           php artisan cache:clear
           php artisan route:clear
@@ -78,7 +98,7 @@ jobs:
           cd ..
           echo "✅ Laravel cache cleared and optimized"
 
-      # 6️⃣ Azure Login
+      # 8️⃣ Azure Login
       - name: 🔐 Azure Login
         uses: azure/login@v2
         with:
@@ -86,56 +106,37 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # 7️⃣ Deploy to Azure Web App
+      # 9️⃣ Deploy to Azure Web App
       - name: 🚀 Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
-          app-name: rg-dmc-mobie-dev
+          app-name: rg-dmc-mobile-dev
           slot-name: Production
           package: ./deployment
 
-      # 8️⃣ Upload and run startup script
-      - name: 📄 Upload startup.sh
+      # 🔟 Upload startup.sh
+      - name: 📄 Upload and run startup.sh
         run: |
           az webapp deploy \
-            --resource-group rg-dmc-mobie-dev \
-            --name rg-dmc-mobie-dev \
+            --resource-group rg-dmc-mobile-dev \
+            --name rg-dmc-mobile-dev \
             --src-path deployment/startup.sh \
             --type startup || echo "⚠️ startup.sh upload skipped"
 
-      # 9️⃣ Restart Azure Web App
+      # 1️⃣1️⃣ Restart Azure Web App
       - name: 🔄 Restart Azure Web App
-        run: az webapp restart --resource-group rg-dmc-mobie-dev --name rg-dmc-mobie-dev
+        run: az webapp restart --resource-group rg-dmc-mobile-dev --name rg-dmc-mobile-dev
 
-      # 🔟 Verify Deployment
+      # 1️⃣2️⃣ Verify Deployment
       - name: ✅ Verify Deployment
         run: |
           sleep 30
           curl -f https://mobiledev.travclicks.com/ || echo "Laravel application may still be starting"
 
-      # 1️⃣1️⃣ Deployment Summary
+      # 1️⃣3️⃣ Deployment Summary
       - name: ✅ Deployment Summary
         run: |
-          echo "🎉 Mobile Dev Laravel Deployment Completed Successfully!"
-          echo ""
-          echo "📦 Deployed Components:"
-          echo "   → Laravel Backend: Deployed to / with optimization"
-          echo "   → Your Custom startup.sh: Used for NGINX and Laravel configuration"
-          echo ""
-          echo "🔧 Laravel Optimizations Applied:"
-          echo "   → All caches cleared and rebuilt"
-          echo "   → Storage directories created and linked"
-          echo "   → App key generated (if needed)"
-          echo "   → Production optimizations enabled"
-          echo ""
-          echo "🌍 Access URLs:"
-          echo "   → Laravel Admin: https://mobiledev.travclicks.com/"
-          echo ""
-          echo "📋 Technical Details:"
-          echo "   → Environment: Production"
-          echo "   → Source Branch: main"
-          echo "   → Azure Web App: rg-dmc-mobie-dev"
-          echo "   → Resource Group: rg-dmc-mobie-dev"
-          echo "   → PHP Version: 8.2"
-          echo ""
-          echo "✅ Deployment completed successfully!"
+          echo "🎉 Laravel App Deployed Successfully!"
+          echo "🌍 URL: https://mobiledev.travclicks.com"
+          echo "📦 Environment: Production"
+          echo "✅ All caches cleared & optimized"
