@@ -9,6 +9,7 @@ use App\Models\Guide;
 use App\Models\Guest;
 use App\Models\Jobsheet;
 
+
 class AuthController extends Controller
 {
     /**
