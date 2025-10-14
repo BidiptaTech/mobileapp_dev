@@ -112,7 +112,7 @@ jobs:
             --type startup || echo "⚠️ startup.sh upload skipped"
 
       - name: 🔁 Restart Azure Web App
-        run: az webapp restart --resource-group rg-dmc-mobile-dev --name dmc-mobile-dev
+        run: az webapp restart --resource-group rg-dmc-mobile-dev --name rg-dmc-mobile-dev
 
       - name: ✅ Deployment Summary
         run: |
