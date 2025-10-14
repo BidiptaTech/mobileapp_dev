@@ -1,4 +1,4 @@
-name: 🚀 Deploy Laravel MAIN to Azure (rg-dmc-mobile-dev)
+name: 🚀 Deploy Laravel to Azure (mobiledev.travclicks.com)
 
 on:
   push:
@@ -12,73 +12,98 @@ permissions:
 
 jobs:
   deploy:
-    name: 🌐 Laravel MAIN Deployment
+    name: 🌐 Laravel Production Deployment
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
-
-    env:
-      PHP_VERSION: '8.4'
 
     steps:
-      - name: 📥 Checkout MAIN branch
+      - name: 📥 Checkout main branch
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: 🔧 Setup PHP
+      - name: 🔧 Setup PHP for Laravel
         uses: shivammathur/setup-php@v2
         with:
-          php-version: ${{ env.PHP_VERSION }}
-          extensions: mbstring, intl, bcmath, xml, ctype, json, pdo_pgsql
-          ini-values: post_max_size=256M, upload_max_filesize=256M, memory_limit=2G
-          coverage: none
+          php-version: '8.2'
+          extensions: mbstring, bcmath, intl, pgsql, pdo_pgsql
+          tools: composer
 
-      - name: 💾 Install Composer
+      - name: 📦 Install Laravel Dependencies
         run: |
-          curl -sS https://getcomposer.org/installer | php
-          mv composer.phar /usr/local/bin/composer
+          composer install --no-dev --optimize-autoloader --no-interaction
+          php artisan config:clear || true
+          php artisan cache:clear || true
 
-      - name: 📦 Install Dependencies
+      - name: 🧱 Create .env file
         run: |
-          composer install --prefer-dist --no-dev --optimize-autoloader
+          echo "APP_NAME=TravclicksMobile" > .env
+          echo "APP_ENV=production" >> .env
+          echo "APP_KEY=" >> .env
+          echo "APP_DEBUG=false" >> .env
+          echo "APP_URL=https://mobiledev.travclicks.com" >> .env
 
-      - name: 🧱 Create startup.sh
+          echo "LOG_CHANNEL=stack" >> .env
+          echo "LOG_LEVEL=debug" >> .env
+
+          echo "DB_CONNECTION=pgsql" >> .env
+          echo "DB_HOST=${{ secrets.DB_HOST }}" >> .env
+          echo "DB_PORT=${{ secrets.DB_PORT }}" >> .env
+          echo "DB_DATABASE=${{ secrets.DB_DATABASE }}" >> .env
+          echo "DB_USERNAME=${{ secrets.DB_USERNAME }}" >> .env
+          echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
+
+          echo "CACHE_DRIVER=file" >> .env
+          echo "SESSION_DRIVER=file" >> .env
+          echo "QUEUE_CONNECTION=sync" >> .env
+
+      - name: 🔑 Generate Application Key
+        run: php artisan key:generate --force
+
+      - name: 🧹 Optimize Laravel for Production
         run: |
-          echo "🧩 Creating startup.sh..."
-          cat << 'EOF' > startup.sh
-          #!/bin/bash
-          echo "🔧 Configuring Laravel app for Azure..."
+          mkdir -p bootstrap/cache storage/framework/{sessions,views,cache}
+          chmod -R 777 storage bootstrap/cache
+          php artisan config:cache
+          php artisan route:cache
+          php artisan view:cache
+          echo "✅ Laravel optimization completed"
 
-          # Ensure NGINX configuration exists
-          if [ -f /home/site/wwwroot/default ]; then
-            cp /home/site/wwwroot/default /etc/nginx/sites-available/default
-            cp /home/site/wwwroot/default /etc/nginx/sites-enabled/default
-            echo "✅ Custom NGINX config applied"
-          else
-            echo "⚠️ No custom default found — using system default"
-          fi
-
-          # Ensure storage and cache directories
-          mkdir -p /home/site/wwwroot/storage/framework/{cache,sessions,views}
-          mkdir -p /home/site/wwwroot/storage/logs
-          chmod -R 777 /home/site/wwwroot/storage /home/site/wwwroot/bootstrap/cache
-
-          # Restart PHP-FPM & NGINX
-          service php8.2-fpm restart
-          service nginx restart
-
-          echo "✅ Laravel app ready!"
-          EOF
-          chmod +x startup.sh
-          echo "✅ startup.sh created successfully."
+      - name: 🧪 Test PostgreSQL Connection
+        run: |
+          php -r "
+          try {
+            new PDO('pgsql:host=${{ secrets.DB_HOST }};port=${{ secrets.DB_PORT }};dbname=${{ secrets.DB_DATABASE }}', '${{ secrets.DB_USERNAME }}', '${{ secrets.DB_PASSWORD }}');
+            echo '✅ PostgreSQL connection successful!';
+          } catch (Exception \$e) {
+            echo '❌ PostgreSQL connection failed: ' . \$e->getMessage();
+            exit(1);
+          }"
 
       - name: 📁 Prepare Deployment Package
         run: |
+          echo "📦 Preparing deployment folder..."
           mkdir -p deployment
-          rsync -av --progress --exclude 'deployment' ./ ./deployment/
-          echo "✅ Deployment package prepared"
+          rsync -av --progress ./ deployment/ --exclude='.git' --exclude='vendor/' --exclude='node_modules/' --exclude='tests/'
+          echo "✅ Base files copied."
+
+          # Include required runtime files
+          cp .env deployment/.env
+          [ -f startup.sh ] && cp startup.sh deployment/
+          [ -f default ] && cp default deployment/
+          [ -f laravel-debug.php ] && cp laravel-debug.php deployment/
+          [ -f .htaccess ] && cp .htaccess deployment/
+          echo "✅ All configuration files copied."
+
+          # Create vendor folder for production
+          cd deployment
+          composer install --no-dev --optimize-autoloader --no-interaction
+          cd ..
+
+          # Compress package
+          cd deployment
+          zip -r ../app.zip .
+          cd ..
+          echo "✅ Deployment zip ready."
 
       - name: 🔐 Azure Login
         uses: azure/login@v2
@@ -87,98 +112,28 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: 🌿 Configure Azure App Settings
-        run: |
-          az webapp config appsettings set \
-            --resource-group rg-dmc-mobile-dev \
-            --name rg-dmc-mobile-dev \
-            --settings \
-          APP_NAME=Travclicks \
-          APP_ENV=production \
-          APP_KEY="${{ secrets.APP_KEY }}" \
-          APP_DEBUG=false \
-          APP_URL=https://mobiledev.travclicks.com/ \
-          LOG_CHANNEL=stack \
-          LOG_LEVEL=debug \
-          DB_CONNECTION=pgsql \
-          DB_HOST=db-dmc-dev.postgres.database.azure.com \
-          DB_PORT=5432 \
-          DB_DATABASE=travclicks_db_dev \
-          DB_USERNAME=travadm_pg_dev \
-          DB_PASSWORD="${{ secrets.DB_PASSWORD }}" \
-          BROADCAST_DRIVER=log \
-          CACHE_DRIVER=file \
-          FILESYSTEM_DISK=local \
-          QUEUE_CONNECTION=sync \
-          SESSION_DRIVER=file \
-          SESSION_LIFETIME=120 \
-          REDIS_HOST=127.0.0.1 \
-          MAIL_MAILER=smtp \
-          MAIL_HOST=smtp.hostinger.com \
-          MAIL_PORT=465 \
-          MAIL_USERNAME="admin@travclicks.com" \
-          MAIL_PASSWORD="${{ secrets.MAIL_PASSWORD }}" \
-          MAIL_ENCRYPTION=SSL \
-          MAIL_FROM_ADDRESS="admin@travclicks.com" \
-          MAIL_FROM_NAME="Travclicks" \
-          AWS_DEFAULT_REGION=us-east-1 \
-          AZURE_STORAGE_NAME=stgdmcappdev \
-          AZURE_STORAGE_KEY="${{ secrets.AZURE_STORAGE_KEY }}" \
-          AZURE_STORAGE_CONTAINER=uploads \
-          AZURE_STORAGE_ENDPOINT=https://stgdmcappdev.blob.core.windows.net/ \
-          STARTUP_COMMAND="bash startup.sh"
-
-      - name: ⚙️ Upload startup.sh to Azure
-        run: |
-          echo "📤 Uploading startup.sh to Azure Web App..."
-          az webapp config set \
-            --resource-group rg-dmc-mobile-dev \
-            --name rg-dmc-mobile-dev \
-            --startup-file "bash startup.sh"
-          echo "✅ startup.sh configured successfully!"
-
-      - name: 🚀 Deploy to Azure Web App
+      - name: 🚀 Deploy Laravel App to Azure (mobiledev.travclicks.com)
         uses: azure/webapps-deploy@v3
         with:
-          app-name: 'rg-dmc-mobile-dev'
-          slot-name: 'Production'
-          package: ./deployment
+          app-name: dmc-mobile-dev
+          slot-name: Production
+          package: ./app.zip
 
-      - name: 🔄 Prepare Laravel Storage & Permissions
+      - name: 📄 Upload and run startup.sh
         run: |
-          echo "📂 Setting up storage folders..."
-          mkdir -p storage/framework/{cache,sessions,views}
-          mkdir -p storage/logs
-          chmod -R 777 storage bootstrap/cache
-          echo "✅ Storage directories ready"
-        env:
-          APP_ENV: production
-
-      - name: ⚙️ Clear and Optimize Laravel (File Cache Only)
-        run: |
-          echo "🔧 Running Laravel optimization..."
-          php artisan config:clear
-          php artisan view:clear
-          php artisan route:clear
-          php artisan clear-compiled
-          php artisan optimize:clear
-          echo "✅ Laravel optimized successfully (file cache)"
-        env:
-          APP_ENV: production
-          APP_DEBUG: false
-          CACHE_DRIVER: file
-          DB_CONNECTION: pgsql
-          DB_HOST: db-dmc-dev.postgres.database.azure.com
-          DB_PORT: 5432
-          DB_DATABASE: travclicks_db_dev
-          DB_USERNAME: travadm_pg_dev
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          az webapp deploy \
+            --resource-group rg-dmc-mobile-dev \
+            --name dmc-mobile-dev \
+            --src-path startup.sh \
+            --type startup
 
       - name: 🔁 Restart Azure Web App
-        run: az webapp restart --resource-group rg-dmc-mobile-dev --name rg-dmc-mobile-dev
+        run: az webapp restart --resource-group rg-dmc-mobile-dev --name dmc-mobile-dev
 
-      - name: ✅ Verify Deployment
+      - name: ✅ Deployment Summary
         run: |
-          echo "🌍 Checking if site is live..."
-          sleep 30
-          curl -f https://mobiledev.travclicks.com/ || echo "⚠️ Laravel app may still be starting up"
+          echo "🎉 Laravel Deployment Completed Successfully!"
+          echo "🌍 URL: https://mobiledev.travclicks.com/"
+          echo "🗃️ Database: PostgreSQL"
+          echo "📦 Environment: Production"
+          echo "💾 App Key generated, caches optimized, permissions fixed."
