@@ -69,7 +69,7 @@ jobs:
             --src-path release.zip \
             --type zip
 
-      # 8️⃣ Create startup.sh at root-path
+      # 8️⃣ Create startup.sh
       - name: ⚙️ Create startup.sh
         run: |
           cat > startup.sh << 'EOF'
