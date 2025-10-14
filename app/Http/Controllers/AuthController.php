@@ -17,27 +17,30 @@ class AuthController extends Controller
      */
     public function login(Request $request)
     {
-        $type = $request->type;
-
+    
         try {
-            if (!in_array($type, ['driver', 'guide', 'guest'])) {
+            
+            $email = $request->email;
+            $password = $request->password;
+
+            if (!$email || !$password) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Invalid type provided. Must be either "driver", "guide", or "guest"',
+                    'message' => 'Email and password are required',
                 ], 400);
             }
 
             // Route to appropriate login function
-            if ($type === 'driver') {
+            if (Driver::where('email', $email)->where('app_password', $password)->first()) {
                 return $this->driverLogin($request);
-            } elseif ($type === 'guide') {
+            } elseif (Guide::where('email', $email)->where('app_password', $password)->first()) {
                 return $this->guideLogin($request);
-            } elseif ($type === 'guest') {
+            } elseif (Guest::where('email', $email)->where('app_password', $password)->first()) {
                 return $this->guestLogin($request);
             } else {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Invalid type provided. Must be either "driver", "guide", or "guest"',
+                    'message' => 'No user found with this email and password',
                 ], 400);
             }
 
@@ -55,8 +58,8 @@ class AuthController extends Controller
      */
     public function driverLogin(Request $request)
     {
-        $email = $request->driver_email;
-        $password = $request->driver_password;
+        $email = $request->email;
+        $password = $request->password;
 
         try {
             // Validate input
@@ -91,11 +94,11 @@ class AuthController extends Controller
                 'success' => true,
                 'message' => 'Driver authenticated successfully',
                 'data' => [
-                    'driver' => $driver,
+                    'driver' => $driver,    
                     'jobsheets' => $jobsheets,
                     'total_jobsheets' => $jobsheets->count(),
                     'token' => $token
-                ]
+                ] 
             ], 200);
 
         } catch (\Exception $e) {
@@ -112,8 +115,8 @@ class AuthController extends Controller
      */
     public function guideLogin(Request $request)
     {
-        $email = $request->guide_email;
-        $password = $request->guide_password;
+        $email = $request->email;
+        $password = $request->password;
 
         try {
             // Validate input
@@ -169,8 +172,8 @@ class AuthController extends Controller
      */
     public function guestLogin(Request $request)
     {
-        $email = $request->guest_email;
-        $password = $request->guest_password;
+        $email = $request->email;
+        $password = $request->password;
 
         try {
             // Validate input
@@ -222,7 +225,7 @@ class AuthController extends Controller
     }
 
     function updateGuest(Request $request){
-        $guest = Guest::where('guest_id', $request->guest_id)->first();
+        $guest = Guest::where('guest_id', $request->id)->first();
         $password = $request->password;
         $guest->app_password = $password;
         $guest->save();
@@ -234,7 +237,7 @@ class AuthController extends Controller
     }
 
     function updateDriver(Request $request){
-        $driver = Driver::where('driver_id', $request->driver_id)->first();
+        $driver = Driver::where('driver_id', $request->id)->first();
         $password = $request->password;
         $driver->app_password = $password;
         $driver->save();
@@ -246,7 +249,7 @@ class AuthController extends Controller
     }
 
     function updateGuide(Request $request){
-        $guide = Guide::where('guide_id', $request->guide_id)->first();
+        $guide = Guide::where('guide_id', $request->id)->first();
         $password = $request->password;
         $guide->app_password = $password;
         $guide->save();
@@ -258,7 +261,7 @@ class AuthController extends Controller
     }
 
     function updateJobsheetStatus(Request $request){
-        $jobsheet = Jobsheet::where('jobsheet_id', $request->jobsheet_id)->first();
+        $jobsheet = Jobsheet::where('jobsheet_id', $request->id)->first();
         $jobsheet->current_status = $request->status;
         $jobsheet->save();
         return response()->json([
@@ -267,5 +270,5 @@ class AuthController extends Controller
             'data' => $jobsheet->refresh()
         ], 200);
     }
-    
+
 }
