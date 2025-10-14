@@ -47,14 +47,6 @@ jobs:
           echo "LOG_CHANNEL=stack" >> .env
           echo "LOG_LEVEL=debug" >> .env
 
-          echo "DB_CONNECTION=pgsql" >> .env
-          echo "DB_HOST=${{ secrets.DB_HOST }}" >> .env
-          echo "DB_PORT=${{ secrets.DB_PORT }}" >> .env
-          echo "DB_DATABASE=${{ secrets.DB_DATABASE }}" >> .env
-          echo "DB_USERNAME=${{ secrets.DB_USERNAME }}" >> .env
-          echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
-          echo "DB_SSLMODE=require" >> .env
-
           echo "CACHE_DRIVER=file" >> .env
           echo "SESSION_DRIVER=file" >> .env
           echo "QUEUE_CONNECTION=sync" >> .env
@@ -86,7 +78,7 @@ jobs:
 
       - name: 📁 Build Deployment Package
         run: |
-          echo "📦 Preparing deployment package..."
+          echo "📦 Preparing deployment..."
           mkdir -p deployment
           rsync -av --exclude='.git' --exclude='node_modules' --exclude='tests' --exclude='.github' ./ deployment/
           cp .env deployment/
@@ -106,7 +98,7 @@ jobs:
       - name: 🚀 Deploy Laravel App to Azure
         uses: azure/webapps-deploy@v3
         with:
-          app-name: dmc-mobile-dev
+          app-name: 'dmc-mobile-dev'
           slot-name: Production
           package: ./app.zip
 
@@ -116,7 +108,7 @@ jobs:
           az webapp deploy \
             --resource-group rg-dmc-mobile-dev \
             --name dmc-mobile-dev \
-            --src-path startup.sh \
+            --src-path deployment/startup.sh \
             --type startup || echo "⚠️ startup.sh upload skipped"
 
       - name: 🔁 Restart Azure Web App
