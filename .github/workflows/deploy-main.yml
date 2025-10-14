@@ -22,11 +22,13 @@ jobs:
       PHP_VERSION: '8.4'
 
     steps:
+      # 1️⃣ Checkout repository
       - name: 📥 Checkout MAIN branch
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      # 2️⃣ Setup PHP
       - name: 🔧 Setup PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -35,22 +37,26 @@ jobs:
           ini-values: post_max_size=256M, upload_max_filesize=256M, memory_limit=2G
           coverage: none
 
+      # 3️⃣ Install Composer
       - name: 🔧 Install Composer Globally
         run: |
           curl -sS https://getcomposer.org/installer | php
           mv composer.phar /usr/local/bin/composer
 
+      # 4️⃣ Install Laravel Dependencies
       - name: 📦 Install Laravel Dependencies
         run: |
           composer validate --no-check-publish
           composer install --prefer-dist --no-dev --optimize-autoloader
 
+      # 5️⃣ Prepare Deployment Package
       - name: 📁 Prepare Deployment Package
         run: |
           mkdir -p deployment
-          cp -r * deployment/
+          rsync -av --progress --exclude 'deployment' ./ ./deployment/
           echo "✅ Deployment package prepared"
 
+      # 6️⃣ Azure Login
       - name: 🔐 Azure Login
         uses: azure/login@v2
         with:
@@ -58,6 +64,45 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      # 7️⃣ Set environment variables in Azure App Service
+      - name: 🌿 Configure Azure App Settings
+        run: |
+          az webapp config appsettings set \
+            --resource-group rg-dmc-mobile-dev \
+            --name rg-dmc-mobile-dev \
+            --settings \
+APP_NAME=Travclicks \
+APP_ENV=production \
+APP_DEBUG=false \
+LOG_CHANNEL=stack \
+DB_CONNECTION=pgsql \
+DB_HOST=db-dmc-dev.postgres.database.azure.com \
+DB_PORT=5432 \
+DB_DATABASE=travclicks_db_dev \
+DB_USERNAME=travadm_pg_dev \
+DB_PASSWORD="${{ secrets.DB_PASSWORD }}" \
+BROADCAST_DRIVER=log \
+CACHE_DRIVER=file \
+FILESYSTEM_DISK=local \
+QUEUE_CONNECTION=sync \
+SESSION_DRIVER=file \
+SESSION_LIFETIME=120 \
+REDIS_HOST=127.0.0.1 \
+MAIL_MAILER=smtp \
+MAIL_HOST=smtp.hostinger.com \
+MAIL_PORT=465 \
+MAIL_USERNAME="admin@travclicks.com" \
+MAIL_PASSWORD="${{ secrets.MAIL_PASSWORD }}" \
+MAIL_ENCRYPTION=SSL \
+MAIL_FROM_ADDRESS="admin@travclicks.com" \
+MAIL_FROM_NAME="Travclicks" \
+AWS_DEFAULT_REGION=us-east-1 \
+AZURE_STORAGE_NAME=stgdmcappdev \
+AZURE_STORAGE_KEY="${{ secrets.AZURE_STORAGE_KEY }}" \
+AZURE_STORAGE_CONTAINER=uploads \
+AZURE_STORAGE_ENDPOINT=https://stgdmcappdev.blob.core.windows.net/
+
+      # 8️⃣ Deploy Laravel application
       - name: 🚀 Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
@@ -65,6 +110,7 @@ jobs:
           slot-name: 'Production'
           package: ./deployment
 
+      # 9️⃣ Clear & optimize Laravel caches
       - name: 🔄 Clear and Optimize Laravel
         run: |
           echo "🔧 Running Laravel cache & optimization commands..."
@@ -76,10 +122,12 @@ jobs:
           php artisan optimize:clear
           echo "✅ Laravel cache cleared and optimized"
 
+      # 🔟 Restart Azure Web App
       - name: 🔄 Restart Azure Web App
         run: az webapp restart --resource-group rg-dmc-mobile-dev --name rg-dmc-mobile-dev
 
+      # 11️⃣ Verify Deployment
       - name: ✅ Verify Deployment
         run: |
           sleep 30
-          curl -f https://your-app-url/ || echo "Laravel app may still be starting"
+          curl -f https://mobiledev.travclicks.com/ || echo "Laravel app may still be starting"
