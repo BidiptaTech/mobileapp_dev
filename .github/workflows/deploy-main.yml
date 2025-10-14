@@ -20,7 +20,7 @@ jobs:
       APP_URL: 'https://mobiledev.travclicks.com'
 
     steps:
-      # 1️⃣ Checkout the main branch
+      # 1️⃣ Checkout main branch
       - name: 📥 Checkout main branch
         uses: actions/checkout@v4
         with:
@@ -36,9 +36,10 @@ jobs:
 
       # 3️⃣ Install Laravel dependencies
       - name: 📦 Install Laravel Dependencies
-        run: composer install --no-dev --optimize-autoloader --no-interaction
+        run: |
+          composer install --no-dev --optimize-autoloader --no-interaction
 
-      # 4️⃣ Generate production .env
+      # 4️⃣ Generate .env file
       - name: 🧱 Generate .env for Production
         run: |
           echo "APP_NAME=TravclicksMobile" > .env
@@ -50,14 +51,6 @@ jobs:
           echo "LOG_CHANNEL=stack" >> .env
           echo "LOG_LEVEL=debug" >> .env
 
-          echo "DB_CONNECTION=pgsql" >> .env
-          echo "DB_HOST=${{ secrets.DB_HOST }}" >> .env
-          echo "DB_PORT=${{ secrets.DB_PORT }}" >> .env
-          echo "DB_DATABASE=${{ secrets.DB_DATABASE }}" >> .env
-          echo "DB_USERNAME=${{ secrets.DB_USERNAME }}" >> .env
-          echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
-          echo "DB_SSLMODE=require" >> .env
-
           echo "CACHE_DRIVER=file" >> .env
           echo "SESSION_DRIVER=file" >> .env
           echo "QUEUE_CONNECTION=sync" >> .env
@@ -65,11 +58,11 @@ jobs:
 
           echo "✅ .env file created"
 
-      # 5️⃣ Generate APP_KEY
+      # 5️⃣ Generate Laravel APP_KEY
       - name: 🔑 Generate Laravel APP_KEY
         run: php artisan key:generate --force
 
-      # 6️⃣ Prepare storage & permissions
+      # 6️⃣ Prepare storage directories & permissions
       - name: 🧹 Prepare Laravel Storage & Permissions
         run: |
           mkdir -p storage/framework/{cache,sessions,views}
@@ -77,34 +70,34 @@ jobs:
           chmod -R 777 storage bootstrap/cache
           echo "✅ Storage folders prepared and permissions fixed"
 
-      # 7️⃣ Optimize Laravel locally
+      # 7️⃣ Optimize Laravel
       - name: ⚙️ Optimize Laravel
         run: |
           php artisan config:clear || true
           php artisan cache:clear || true
           php artisan route:clear || true
           php artisan view:clear || true
+          php artisan clear-compiled || true
           php artisan optimize:clear || true
           php artisan config:cache
           php artisan route:cache
           php artisan view:cache
           echo "✅ Laravel optimized for production"
 
-      # 8️⃣ Prepare deployment package
+      # 8️⃣ Build deployment package
       - name: 📁 Build Deployment Package
         run: |
-          echo "📦 Preparing deployment..."
+          echo "📦 Preparing deployment package..."
           mkdir -p deployment
           rsync -av --exclude='.git' --exclude='node_modules' --exclude='tests' --exclude='.github' ./ deployment/
           cp .env deployment/
           [ -f startup.sh ] && cp startup.sh deployment/
           [ -f default ] && cp default deployment/
           [ -f .htaccess ] && cp .htaccess deployment/
-          cd deployment && composer install --no-dev --optimize-autoloader --no-interaction && cd ..
           cd deployment && zip -r ../app.zip . && cd ..
           echo "✅ app.zip ready for deployment"
 
-      # 🔐 Azure login
+      # 9️⃣ Azure Login
       - name: 🔐 Azure Login
         uses: azure/login@v2
         with:
@@ -112,15 +105,15 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # 9️⃣ Deploy Laravel to Azure
+      # 🔟 Deploy Laravel to Azure Web App
       - name: 🚀 Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
-          app-name: 'dmc-mobile-dev'
+          app-name: 'rg-dmc-mobile-dev'
           slot-name: 'Production'
           package: ./app.zip
 
-      # 🔟 Clear & optimize Laravel after deployment
+      # 1️⃣1️⃣ Clear & optimize Laravel caches after deploy
       - name: 🔄 Clear and Optimize Laravel
         run: |
           echo "🔧 Running Laravel cache & optimization commands..."
@@ -132,6 +125,14 @@ jobs:
           php artisan optimize:clear
           echo "✅ Laravel cache cleared and optimized"
 
-      # 1️⃣1️⃣ Restart Azure Web App
+      # 1️⃣2️⃣ Restart Azure Web App
       - name: 🔄 Restart Azure Web App
-        run: az webapp restart --resource-group rg-dmc-mobile-dev --name dmc-mobile-dev
+        run: az webapp restart --resource-group rg-dmc-mobile-dev --name rg-dmc-mobile-dev
+
+      # 1️⃣3️⃣ Deployment summary
+      - name: ✅ Deployment Summary
+        run: |
+          echo "🎉 Laravel App Deployed Successfully!"
+          echo "🌍 URL: https://mobiledev.travclicks.com"
+          echo "📦 Environment: Production"
+          echo "✅ All caches cleared & optimized"
