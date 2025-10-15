@@ -93,10 +93,7 @@ return [
             'charset' => 'utf8',
             'prefix' => '',
             'schema' => 'public',
-            'sslmode' => 'require',
-            'options' => extension_loaded('pdo_pgsql') ? [
-                PDO::PGSQL_ATTR_SSL_MODE => 'require',
-            ] : [],
+            'sslmode' => env('DB_SSLMODE', 'require'),
         ],
 
         'sqlsrv' => [
