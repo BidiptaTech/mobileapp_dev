@@ -8,6 +8,7 @@ use App\Models\Driver;
 use App\Models\Guide;
 use App\Models\Guest;
 use App\Models\Jobsheet;
+use App\Models\Tour;
 
 
 class AuthController extends Controller
@@ -184,8 +185,12 @@ class AuthController extends Controller
                 ], 400);
             }
 
-            // Authenticate guest
-            $guest = Guest::where('email', $email)
+            // Authenticate guest (exclude timestamps from query)
+            $guest = Guest::select([
+                'id', 'guest_id', 'tour_id', 'guest_name', 'email', 
+                'contact', 'country_code', 'app_password'
+            ])
+                ->where('email', $email)
                 ->where('app_password', $password)
                 ->first();
 
@@ -196,10 +201,40 @@ class AuthController extends Controller
                 ], 404);
             }
 
-            // Fetch orders for this guest's tour_id
-            $orders = Order::whereNotNull('tour_id')
+            // First, get all tours for this guest's tour_id (exclude timestamps)
+            $tours = Tour::select([
+                'id', 'unique_tour_id', 'destination', 'adult', 'child', 
+                'check_in_time', 'check_out_time', 'infant', 'agent_id', 
+                'male_count', 'female_count', 'child_ages', 'tour_id', 
+                'hotel', 'attraction', 'travel', 'restaurent', 'guide', 
+                'status', 'port', 'assign_guide_id', 'display_id', 
+                'assign_driver_id', 'payment_details', 'is_approve', 
+                'tour_status', 'city', 'dmc_id', 'multi_enq_id', 'auto_cancel_date'
+            ])
                 ->where('tour_id', $guest->tour_id)
                 ->get();
+            
+            // Then map over tours and get all orders for each tour
+            $toursWithOrders = $tours->map(function ($tour) {
+                // Get all orders for this tour (without the tour relationship and timestamps)
+                $orders = Order::select([
+                    'id', 'agent_id', 'tour_id', 'data', 'type', 'status', 
+                    'booking_id', 'reference_id', 'invoice_pdf', 'bookingType', 
+                    'discount', 'markup_percentage', 'cancel_reason', 'approval_file', 
+                    'is_approve', 'approval_id', 'actual_due_date', 'display_due_date', 
+                    'voucher_image', 'upload_files'
+                ])
+                    ->without('tour')
+                    ->where('tour_id', $tour->tour_id)
+                    ->get();
+                
+                // Add orders to tour object
+                $tourData = $tour->toArray();
+                $tourData['orders'] = $orders;
+                $tourData['total_orders'] = $orders->count();
+                
+                return $tourData;
+            });
 
             // Generate Sanctum token
             $token = $guest->createToken('guest-token')->plainTextToken;
@@ -209,8 +244,8 @@ class AuthController extends Controller
                 'message' => 'Guest authenticated successfully',
                 'data' => [
                     'guest' => $guest,
-                    'bookings' => $orders,
-                    'total_bookings' => $orders->count(),
+                    'tours' => $toursWithOrders,
+                    'total_tours' => $toursWithOrders->count(),
                     'token' => $token
                 ]
             ], 200);
