@@ -72,6 +72,7 @@ jobs:
       # 8️⃣ Create default NGINX config
       - name: ⚙️ Create default NGINX file
         run: |
+          mkdir -p /home/site/wwwroot
           cat > /home/site/wwwroot/default << 'EOF'
           server {
               listen 8080;
@@ -98,17 +99,22 @@ jobs:
           }
           EOF
 
-      # 9️⃣ Copy default file to NGINX and restart
-      - name: 🔄 Apply NGINX config and restart
+      # 9️⃣ Copy NGINX config and restart service
+      - name: 🔄 Apply NGINX config
         run: |
           cp /home/site/wwwroot/default /etc/nginx/sites-available/default
-          cp /home/site/wwwroot/default /etc/nginx/sites-enabled/default
-          nginx -t && service nginx restart || echo "NGINX restart failed"
+          cp /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
+          service nginx restart
 
-      # 🔟 Laravel cache clear & optimize (without touching .env)
-      - name: 🧹 Laravel cache clear & optimize
+      # 🔟 Set Laravel permissions and caches
+      - name: 🛠️ Laravel setup
         run: |
-          cd /home/site/wwwroot || exit 1
+          APP_DIR="/home/site/wwwroot"
+          mkdir -p $APP_DIR/storage/framework/{sessions,views,cache/data}
+          mkdir -p $APP_DIR/storage/{logs,app/public} $APP_DIR/bootstrap/cache
+          chmod -R 775 $APP_DIR/storage $APP_DIR/bootstrap/cache
+
+          cd $APP_DIR || exit 1
           php artisan cache:clear || true
           php artisan config:clear || true
           php artisan route:clear || true
@@ -136,4 +142,4 @@ jobs:
           echo "🎉 Deployment finished!"
           echo "🌍 App URL: https://mobiledev.travclicks.com"
           echo "✔️ Laravel root path ready, caches cleared and optimized"
-          echo "🛠️ Default NGINX applied, storage linked, and permissions set"
+          echo "🛠️ Directories created, permissions set"
