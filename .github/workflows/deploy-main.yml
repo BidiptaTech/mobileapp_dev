@@ -69,10 +69,17 @@ jobs:
             --src-path release.zip \
             --type zip
 
-      # 8️⃣ Create default NGINX config
-      - name: ⚙️ Create default NGINX file
+      # 8️⃣ Create required Laravel directories inside wwwroot
+      - name: 📁 Create Laravel storage & bootstrap/cache directories
         run: |
-          mkdir -p /home/site/wwwroot
+          APP_DIR=/home/site/wwwroot
+          mkdir -p $APP_DIR/storage/framework/{sessions,views,cache/data}
+          mkdir -p $APP_DIR/storage/{logs,app/public} $APP_DIR/bootstrap/cache
+          chmod -R 775 $APP_DIR/storage $APP_DIR/bootstrap/cache
+
+      # 9️⃣ Create default NGINX file
+      - name: ⚙️ Create default NGINX config
+        run: |
           cat > /home/site/wwwroot/default << 'EOF'
           server {
               listen 8080;
@@ -99,22 +106,17 @@ jobs:
           }
           EOF
 
-      # 9️⃣ Copy NGINX config and restart service
+      # 🔟 Copy NGINX default file and restart
       - name: 🔄 Apply NGINX config
         run: |
           cp /home/site/wwwroot/default /etc/nginx/sites-available/default
           cp /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
-          service nginx restart
+          nginx -t && service nginx restart
 
-      # 🔟 Set Laravel permissions and caches
-      - name: 🛠️ Laravel setup
+      # 1️⃣1️⃣ Clear and optimize Laravel caches
+      - name: 🧹 Laravel cache & optimization
         run: |
-          APP_DIR="/home/site/wwwroot"
-          mkdir -p $APP_DIR/storage/framework/{sessions,views,cache/data}
-          mkdir -p $APP_DIR/storage/{logs,app/public} $APP_DIR/bootstrap/cache
-          chmod -R 775 $APP_DIR/storage $APP_DIR/bootstrap/cache
-
-          cd $APP_DIR || exit 1
+          cd /home/site/wwwroot
           php artisan cache:clear || true
           php artisan config:clear || true
           php artisan route:clear || true
@@ -125,18 +127,18 @@ jobs:
           php artisan view:cache || true
           php artisan storage:link || true
 
-      # 1️⃣1️⃣ Restart Azure Web App
+      # 1️⃣2️⃣ Restart Azure Web App (from GitHub Actions)
       - name: 🔄 Restart Web App
         run: |
           az webapp restart --resource-group rg-dmc-mobile-dev --name rg-dmc-mobile-dev
 
-      # 1️⃣2️⃣ Verify deployment
+      # 1️⃣3️⃣ Verify deployment
       - name: ✅ Verify Deployment
         run: |
           sleep 30
           curl -f https://mobiledev.travclicks.com/ || echo "Application may still be starting"
 
-      # 1️⃣3️⃣ Deployment Summary
+      # 1️⃣4️⃣ Deployment Summary
       - name: 📦 Deployment Summary
         run: |
           echo "🎉 Deployment finished!"
