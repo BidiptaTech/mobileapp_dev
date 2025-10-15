@@ -12,6 +12,9 @@ Route::prefix('app/v1')->group(function () {
         Route::post('/update-driver', [AuthController::class, 'updateDriver']);
         Route::post('/update-guide', [AuthController::class, 'updateGuide']);
         Route::post('/update-jobsheet-status', [AuthController::class, 'updateJobsheetStatus']);
+        Route::get('/driver-jobsheets', [AuthController::class, 'getDriverJobsheets']);
+        Route::get('/guide-jobsheets', [AuthController::class, 'getGuideJobsheets']);
+        Route::get('/guest-bookings', [AuthController::class, 'getGuestBookings']);
         
         Route::get('/user', function (Request $request) {
             return $request->user();
