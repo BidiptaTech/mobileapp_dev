@@ -84,33 +84,6 @@ class AuthController extends Controller
                 ], 404);
             }
 
-            // Fetch jobsheets for this driver with vehicle information
-            $jobsheets = Jobsheet::whereNotNull('driver_id')
-                ->where('driver_id', $driver->id)
-                ->get();
-
-            // Add vehicle information to each jobsheet
-            $jobsheetsWithVehicles = $jobsheets->map(function ($jobsheet) {
-                $jobsheetData = $jobsheet->toArray();
-                
-                // Get vehicle details if vehicle_id exists
-                if ($jobsheet->vehicle_id) {
-                    $vehicle = Vehicle::select([
-                        'id', 'vehicle_id', 'vehicle_name', 'vehicle_type', 'vehicle_model', 
-                        'model_year', 'image', 'description', 'seating_capacity', 'vehicle_icon', 
-                        'is_available', 'dmc_id', 'driver_id', 'is_active', 'created_by'
-                    ])
-                    ->where('vehicle_id', $jobsheet->vehicle_id)
-                    ->first();
-                    
-                    $jobsheetData['vehicle'] = $vehicle;
-                } else {
-                    $jobsheetData['vehicle'] = null;
-                }
-                
-                return $jobsheetData;
-            });
-
             // Generate Sanctum token
             $token = $driver->createToken('driver-token')->plainTextToken;
 
@@ -118,11 +91,9 @@ class AuthController extends Controller
                 'success' => true,
                 'message' => 'Driver authenticated successfully',
                 'data' => [
-                    'driver' => $driver,    
-                    'jobsheets' => $jobsheetsWithVehicles,
-                    'total_jobsheets' => $jobsheetsWithVehicles->count(),
+                    'driver' => $driver,
                     'token' => $token
-                ] 
+                ]
             ], 200);
 
         } catch (\Exception $e) {
@@ -163,11 +134,6 @@ class AuthController extends Controller
                 ], 404);
             }
 
-            // Fetch jobsheets for this guide
-            $jobsheets = Jobsheet::whereNotNull('guide_id')
-                ->where('guide_id', $guide->id)
-                ->get();
-
             // Generate Sanctum token
             $token = $guide->createToken('guide-token')->plainTextToken;
 
@@ -176,8 +142,6 @@ class AuthController extends Controller
                 'message' => 'Guide authenticated successfully',
                 'data' => [
                     'guide' => $guide,
-                    'jobsheets' => $jobsheets,
-                    'total_jobsheets' => $jobsheets->count(),
                     'token' => $token
                 ]
             ], 200);
@@ -186,6 +150,152 @@ class AuthController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error during guide authentication',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get driver jobsheets
+     */
+    public function getDriverJobsheets(Request $request)
+    {
+        try {
+            // Get the authenticated driver from the token
+            $driver_id = $request->driver_id;
+            
+            if (!$driver_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid driver token',
+                ], 401);
+            }
+
+            // Fetch jobsheets for this driver with vehicle information
+            $jobsheets = Jobsheet::whereNotNull('driver_id')
+                ->where('driver_id', $driver_id)
+                ->get();
+
+            // Add vehicle information to each jobsheet
+            $jobsheetsWithVehicles = $jobsheets->map(function ($jobsheet) {
+                $jobsheetData = $jobsheet->toArray();
+                
+                // Get vehicle details if vehicle_id exists
+                if ($jobsheet->vehicle_id) {
+                    $vehicle = Vehicle::select([
+                        'id', 'vehicle_id', 'vehicle_name', 'vehicle_type', 'vehicle_model', 
+                        'model_year', 'image', 'description', 'seating_capacity', 'vehicle_icon', 
+                        'is_available', 'dmc_id', 'driver_id', 'created_by'
+                    ])
+                    ->where('vehicle_id', $jobsheet->vehicle_id)
+                    ->first();
+                    
+                    $jobsheetData['vehicle'] = $vehicle;
+                } else {
+                    $jobsheetData['vehicle'] = null;
+                }
+                
+                return $jobsheetData;
+            });
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Driver jobsheets retrieved successfully',
+                'data' => [
+                    'jobsheets' => $jobsheetsWithVehicles,
+                    'total_jobsheets' => $jobsheetsWithVehicles->count()
+                ]
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error retrieving driver jobsheets',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get guide jobsheets
+     */
+    public function getGuideJobsheets(Request $request)
+    {
+        try {
+            // Get the authenticated guide from the token
+            $guide_id = $request->guide_id;
+            
+            if (!$guide_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid guide token',
+                ], 401);
+            }
+
+            // Fetch jobsheets for this guide with vehicle information
+            $jobsheets = Jobsheet::whereNotNull('guide_id')
+                ->where('guide_id', $guide_id)
+                ->get();
+
+            // Add vehicle information and order hours to each jobsheet
+            $jobsheetsWithVehicles = $jobsheets->map(function ($jobsheet) {
+                $jobsheetData = $jobsheet->toArray();
+                
+                // Get vehicle details if vehicle_id exists
+                if ($jobsheet->vehicle_id) {
+                    $vehicle = Vehicle::select([
+                        'id', 'vehicle_id', 'vehicle_name', 'vehicle_type', 'vehicle_model', 
+                        'model_year', 'image', 'description', 'seating_capacity', 'vehicle_icon', 
+                        'is_available', 'dmc_id', 'driver_id', 'created_by'
+                    ])
+                    ->where('vehicle_id', $jobsheet->vehicle_id)
+                    ->first();
+                    
+                    $jobsheetData['vehicle'] = $vehicle;
+                } else {
+                    $jobsheetData['vehicle'] = null;
+                }
+                
+                // Get order hours if order_id exists
+                
+                if ($jobsheet->order_id) {
+                    $order = Order::select('data')
+                        ->where('booking_id', $jobsheet->order_id)
+                        ->first();
+                        
+                    
+                    if ($order && $order->data) {
+                        $orderData = is_string($order->data) ? json_decode($order->data, true) : $order->data;
+                        
+                        // Extract hours from order data
+                        if (isset($orderData[0]['hours'])) {
+                            $jobsheetData['hours'] = $orderData[0]['hours'];
+                        } else {
+                            $jobsheetData['hours'] = null;
+                        }
+                    } else {
+                        $jobsheetData['hours'] = null;
+                    }
+                } else {
+                    $jobsheetData['hours'] = null;
+                }
+                
+                return $jobsheetData;
+            });
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Guide jobsheets retrieved successfully',
+                'data' => [
+                    'jobsheets' => $jobsheetsWithVehicles,
+                    'total_jobsheets' => $jobsheetsWithVehicles->count()
+                ]
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error retrieving guide jobsheets',
                 'error' => $e->getMessage()
             ], 500);
         }
@@ -211,7 +321,7 @@ class AuthController extends Controller
             // Authenticate guest (exclude timestamps from query)
             $guest = Guest::select([
                 'id', 'guest_id', 'tour_id', 'guest_name', 'email', 
-                'contact', 'country_code', 'app_password'
+                'contact', 'country_code'
             ])
                 ->where('email', $email)
                 ->where('app_password', $password)
@@ -224,40 +334,34 @@ class AuthController extends Controller
                 ], 404);
             }
 
-            // First, get all tours for this guest's tour_id (exclude timestamps)
-            $tours = Tour::select([
-                'id', 'unique_tour_id', 'destination', 'adult', 'child', 
-                'check_in_time', 'check_out_time', 'infant', 'agent_id', 
-                'male_count', 'female_count', 'child_ages', 'tour_id', 
-                'hotel', 'attraction', 'travel', 'restaurent', 'guide', 
-                'status', 'port', 'assign_guide_id', 'display_id', 
-                'assign_driver_id', 'payment_details', 'is_approve', 
-                'tour_status', 'city', 'dmc_id', 'multi_enq_id', 'auto_cancel_date'
-            ])
-                ->where('tour_id', $guest->tour_id)
-                ->get();
+            // Get all tours for this guest's tour_id to calculate counts
+            $tours = Tour::where('tour_id', $guest->tour_id)->get();
             
-            // Then map over tours and get all orders for each tour
-            $toursWithOrders = $tours->map(function ($tour) {
-                // Get all orders for this tour (without the tour relationship and timestamps)
-                $orders = Order::select([
-                    'id', 'agent_id', 'tour_id', 'data', 'type', 'status', 
-                    'booking_id', 'reference_id', 'invoice_pdf', 'bookingType', 
-                    'discount', 'markup_percentage', 'cancel_reason', 'approval_file', 
-                    'is_approve', 'approval_id', 'actual_due_date', 'display_due_date', 
-                    'voucher_image', 'upload_files'
-                ])
-                    ->without('tour')
-                    ->where('tour_id', $tour->tour_id)
-                    ->get();
-                
-                // Add orders to tour object
-                $tourData = $tour->toArray();
-                $tourData['orders'] = $orders;
-                $tourData['total_orders'] = $orders->count();
-                
-                return $tourData;
-            });
+            $now = now();
+            
+            // Calculate tour counts based on check_in_time and check_out_time
+            $pastTours = $tours->filter(function ($tour) use ($now) {
+                return $tour->check_out_time && $tour->check_out_time < $now;
+            })->count();
+            
+            $ongoingTours = $tours->filter(function ($tour) use ($now) {
+                return $tour->check_in_time && $tour->check_out_time && 
+                       $tour->check_in_time <= $now && $tour->check_out_time >= $now;
+            })->count();
+            
+            $upcomingTours = $tours->filter(function ($tour) use ($now) {
+                return $tour->check_in_time && $tour->check_in_time > $now;
+            })->count();
+            
+            $totalTours = $tours->count();
+            
+            // Create tour counts object
+            $tourCounts = [
+                'past' => $pastTours,
+                'ongoing' => $ongoingTours,
+                'upcoming' => $upcomingTours,
+                'total' => $totalTours
+            ];
 
             // Generate Sanctum token
             $token = $guest->createToken('guest-token')->plainTextToken;
@@ -267,8 +371,7 @@ class AuthController extends Controller
                 'message' => 'Guest authenticated successfully',
                 'data' => [
                     'guest' => $guest,
-                    'tours' => $toursWithOrders,
-                    'total_tours' => $toursWithOrders->count(),
+                    'tour_counts' => $tourCounts,
                     'token' => $token
                 ]
             ], 200);
@@ -280,6 +383,66 @@ class AuthController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+    
+    public function getGuestBookings(Request $request){
+        $guest_id = $request->guest_id;
+        $status_type = $request->status_type;
+        $now = now();
+        
+        // Get guest to find their tour_id
+        $guest = Guest::where('guest_id', $guest_id)->first();
+        if (!$guest) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Guest not found',
+            ], 404);
+        }
+        
+        // Get tours based on status_type using check_in_time and check_out_time
+        $toursQuery = Tour::where('tour_id', $guest->tour_id);
+        
+        if($status_type == 'past'){
+            $toursQuery->where('check_out_time', '<', $now);
+        } else if($status_type == 'ongoing'){
+            $toursQuery->where('check_in_time', '<=', $now)
+                      ->where('check_out_time', '>=', $now);
+        } else if($status_type == 'upcoming'){
+            $toursQuery->where('check_in_time', '>', $now);
+        }
+        
+        $tours = $toursQuery->get();
+        
+        // Map over tours and get all orders for each tour
+        $toursWithOrders = $tours->map(function ($tour) {
+            // Get all orders for this tour (without the tour relationship to avoid duplication)
+            $orders = Order::select([
+                'id', 'agent_id', 'tour_id', 'data', 'type', 'status', 
+                'booking_id', 'reference_id', 'invoice_pdf', 'bookingType', 
+                'discount', 'markup_percentage', 'cancel_reason', 'approval_file', 
+                'is_approve', 'approval_id', 'actual_due_date', 'display_due_date', 
+                'voucher_image', 'upload_files'
+            ])
+                ->without('tour')
+                ->where('tour_id', $tour->tour_id)
+                ->get();
+            
+            // Add orders to tour object
+            $tourData = $tour->toArray();
+            $tourData['orders'] = $orders;
+            $tourData['total_orders'] = $orders->count();
+            
+            return $tourData;
+        });
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Guest bookings retrieved successfully',
+            'data' => [
+                'tours' => $toursWithOrders,
+                'total_tours' => $toursWithOrders->count()
+            ]
+        ], 200);
     }
 
     function updateGuest(Request $request){
