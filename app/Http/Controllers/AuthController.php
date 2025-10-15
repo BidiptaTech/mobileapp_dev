@@ -9,6 +9,7 @@ use App\Models\Guide;
 use App\Models\Guest;
 use App\Models\Jobsheet;
 use App\Models\Tour;
+use App\Models\Vehicle;
 
 
 class AuthController extends Controller
@@ -83,10 +84,32 @@ class AuthController extends Controller
                 ], 404);
             }
 
-            // Fetch jobsheets for this driver
+            // Fetch jobsheets for this driver with vehicle information
             $jobsheets = Jobsheet::whereNotNull('driver_id')
                 ->where('driver_id', $driver->id)
                 ->get();
+
+            // Add vehicle information to each jobsheet
+            $jobsheetsWithVehicles = $jobsheets->map(function ($jobsheet) {
+                $jobsheetData = $jobsheet->toArray();
+                
+                // Get vehicle details if vehicle_id exists
+                if ($jobsheet->vehicle_id) {
+                    $vehicle = Vehicle::select([
+                        'id', 'vehicle_id', 'vehicle_name', 'vehicle_type', 'vehicle_model', 
+                        'model_year', 'image', 'description', 'seating_capacity', 'vehicle_icon', 
+                        'is_available', 'dmc_id', 'driver_id', 'is_active', 'created_by'
+                    ])
+                    ->where('vehicle_id', $jobsheet->vehicle_id)
+                    ->first();
+                    
+                    $jobsheetData['vehicle'] = $vehicle;
+                } else {
+                    $jobsheetData['vehicle'] = null;
+                }
+                
+                return $jobsheetData;
+            });
 
             // Generate Sanctum token
             $token = $driver->createToken('driver-token')->plainTextToken;
@@ -96,8 +119,8 @@ class AuthController extends Controller
                 'message' => 'Driver authenticated successfully',
                 'data' => [
                     'driver' => $driver,    
-                    'jobsheets' => $jobsheets,
-                    'total_jobsheets' => $jobsheets->count(),
+                    'jobsheets' => $jobsheetsWithVehicles,
+                    'total_jobsheets' => $jobsheetsWithVehicles->count(),
                     'token' => $token
                 ] 
             ], 200);
