@@ -163,6 +163,8 @@ class AuthController extends Controller
         try {
             // Get the authenticated driver from the token
             $driver_id = $request->driver_id;
+            $auth_user = $request->auth_user;
+            
             
             if (!$driver_id) {
                 return response()->json([
