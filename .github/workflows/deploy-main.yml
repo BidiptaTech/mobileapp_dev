@@ -69,53 +69,46 @@ jobs:
             --src-path release.zip \
             --type zip
 
-      # 8️⃣ Create startup.sh
-      - name: ⚙️ Create startup.sh
+      # 8️⃣ Create default NGINX config
+      - name: ⚙️ Create default NGINX file
         run: |
-          cat > startup.sh << 'EOF'
-          #!/bin/bash
-          echo "🔧 Laravel root-path setup on Azure Web App..."
-
-          APP_DIR="/home/site/wwwroot"
-
-          # --- Create default NGINX file ---
-          cat > $APP_DIR/default << 'NGINX_EOF'
+          cat > /home/site/wwwroot/default << 'EOF'
           server {
               listen 8080;
+          
               root /home/site/wwwroot/public;
               index index.php index.html index.htm;
+          
               server_name _;
-
+          
               location / {
                   try_files $uri $uri/ /index.php?$query_string;
               }
-
+          
               location ~ \.php$ {
                   include fastcgi_params;
                   fastcgi_pass 127.0.0.1:9000;
                   fastcgi_index index.php;
                   fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
               }
-
+          
               location ~ /\.ht {
                   deny all;
               }
           }
-          NGINX_EOF
+          EOF
 
-          # --- Copy default to NGINX directories and restart ---
-          cp $APP_DIR/default /etc/nginx/sites-available/default
-          cp $APP_DIR/default /etc/nginx/sites-enabled/default
-          nginx -t && service nginx restart || echo "NGINX reload failed"
+      # 9️⃣ Copy default file to NGINX and restart
+      - name: 🔄 Apply NGINX config and restart
+        run: |
+          cp /home/site/wwwroot/default /etc/nginx/sites-available/default
+          cp /home/site/wwwroot/default /etc/nginx/sites-enabled/default
+          nginx -t && service nginx restart || echo "NGINX restart failed"
 
-          # --- Set Laravel directories & permissions ---
-          mkdir -p $APP_DIR/storage/framework/{sessions,views,cache/data}
-          mkdir -p $APP_DIR/storage/{logs,app/public} $APP_DIR/bootstrap/cache
-          chmod -R 775 $APP_DIR/storage $APP_DIR/bootstrap/cache
-
-          cd $APP_DIR || exit 1
-
-          # --- Clear and optimize Laravel caches ---
+      # 🔟 Laravel cache clear & optimize (without touching .env)
+      - name: 🧹 Laravel cache clear & optimize
+        run: |
+          cd /home/site/wwwroot || exit 1
           php artisan cache:clear || true
           php artisan config:clear || true
           php artisan route:clear || true
@@ -124,38 +117,23 @@ jobs:
           php artisan config:cache || true
           php artisan route:cache || true
           php artisan view:cache || true
-
-          # --- Create storage symlink ---
           php artisan storage:link || true
 
-          echo "🎯 Laravel app ready at root, caches cleared, permissions set, NGINX configured"
-          EOF
-          chmod +x startup.sh
-
-      # 9️⃣ Upload and run startup.sh
-      - name: 📄 Upload and run startup script
-        run: |
-          az webapp deploy \
-            --resource-group rg-dmc-mobile-dev \
-            --name rg-dmc-mobile-dev \
-            --src-path startup.sh \
-            --type startup
-
-      # 🔄 Restart Azure Web App
+      # 1️⃣1️⃣ Restart Azure Web App
       - name: 🔄 Restart Web App
         run: |
           az webapp restart --resource-group rg-dmc-mobile-dev --name rg-dmc-mobile-dev
 
-      # 🔎 Verify deployment
+      # 1️⃣2️⃣ Verify deployment
       - name: ✅ Verify Deployment
         run: |
           sleep 30
           curl -f https://mobiledev.travclicks.com/ || echo "Application may still be starting"
 
-      # 📦 Deployment Summary
+      # 1️⃣3️⃣ Deployment Summary
       - name: 📦 Deployment Summary
         run: |
           echo "🎉 Deployment finished!"
           echo "🌍 App URL: https://mobiledev.travclicks.com"
           echo "✔️ Laravel root path ready, caches cleared and optimized"
-          echo "🛠️ NGINX default created and restarted"
+          echo "🛠️ Default NGINX applied, storage linked, and permissions set"
