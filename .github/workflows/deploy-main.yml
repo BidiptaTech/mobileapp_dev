@@ -78,56 +78,43 @@ jobs:
 
           APP_DIR="/home/site/wwwroot"
 
+          # --- Create default NGINX file ---
+          cat > $APP_DIR/default << 'NGINX_EOF'
+          server {
+              listen 8080;
+              root /home/site/wwwroot/public;
+              index index.php index.html index.htm;
+              server_name _;
+
+              location / {
+                  try_files $uri $uri/ /index.php?$query_string;
+              }
+
+              location ~ \.php$ {
+                  include fastcgi_params;
+                  fastcgi_pass 127.0.0.1:9000;
+                  fastcgi_index index.php;
+                  fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+              }
+
+              location ~ /\.ht {
+                  deny all;
+              }
+          }
+          NGINX_EOF
+
+          # --- Copy default to NGINX directories and restart ---
+          cp $APP_DIR/default /etc/nginx/sites-available/default
+          cp $APP_DIR/default /etc/nginx/sites-enabled/default
+          nginx -t && service nginx restart || echo "NGINX reload failed"
+
           # --- Set Laravel directories & permissions ---
           mkdir -p $APP_DIR/storage/framework/{sessions,views,cache/data}
           mkdir -p $APP_DIR/storage/{logs,app/public} $APP_DIR/bootstrap/cache
           chmod -R 775 $APP_DIR/storage $APP_DIR/bootstrap/cache
-          
+
           cd $APP_DIR || exit 1
-          
-          # --- Write environment variables dynamically ---
-          cat > .env << ENV_EOF
-          APP_NAME=Travclicks
-          APP_ENV=production
-          APP_KEY=${APP_KEY}
-          APP_DEBUG=false
-          APP_URL=https://mobiledev.travclicks.com/
-          LOG_CHANNEL=stack
-          LOG_LEVEL=debug
-          DB_CONNECTION=pgsql
-          DB_HOST=db-dmc-dev.postgres.database.azure.com
-          DB_PORT=5432
-          DB_DATABASE=travclicks_db_dev
-          DB_USERNAME=travadm_pg_dev
-          DB_PASSWORD=${DB_PASSWORD}
-          BROADCAST_DRIVER=log
-          CACHE_DRIVER=file
-          FILESYSTEM_DISK=local
-          QUEUE_CONNECTION=sync
-          SESSION_DRIVER=file
-          SESSION_LIFETIME=120
-          REDIS_HOST=127.0.0.1
-          MAIL_MAILER=smtp
-          MAIL_HOST=smtp.hostinger.com
-          MAIL_PORT=465
-          MAIL_USERNAME=admin@travclicks.com
-          MAIL_PASSWORD=${MAIL_PASSWORD}
-          MAIL_ENCRYPTION=SSL
-          MAIL_FROM_ADDRESS=admin@travclicks.com
-          MAIL_FROM_NAME=Travclicks
-          AWS_DEFAULT_REGION=us-east-1
-          AZURE_STORAGE_NAME=stgdmcappdev
-          AZURE_STORAGE_KEY=${AZURE_STORAGE_KEY}
-          AZURE_STORAGE_CONTAINER=uploads
-          AZURE_STORAGE_ENDPOINT=https://stgdmcappdev.blob.core.windows.net/
-          ENV_EOF
-          
-          # --- Laravel key ---
-          if ! grep -q "APP_KEY=base64:" .env 2>/dev/null; then
-              echo "🔑 Generating Laravel APP_KEY..."
-              php artisan key:generate --force || true
-          fi
-          
+
           # --- Clear and optimize Laravel caches ---
           php artisan cache:clear || true
           php artisan config:clear || true
@@ -137,21 +124,13 @@ jobs:
           php artisan config:cache || true
           php artisan route:cache || true
           php artisan view:cache || true
-          
+
           # --- Create storage symlink ---
           php artisan storage:link || true
-          
-          # --- NGINX reload if custom default exists ---
-          if [ -f "$APP_DIR/default" ]; then
-              cp $APP_DIR/default /etc/nginx/sites-available/default
-              cp /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
-              nginx -t && service nginx reload || echo "NGINX reload failed"
-          fi
-          
-          echo "🎯 Laravel app ready at root, caches cleared, permissions set"
-          EOF
-                    chmod +x startup.sh
 
+          echo "🎯 Laravel app ready at root, caches cleared, permissions set, NGINX configured"
+          EOF
+          chmod +x startup.sh
 
       # 9️⃣ Upload and run startup.sh
       - name: 📄 Upload and run startup script
@@ -162,7 +141,7 @@ jobs:
             --src-path startup.sh \
             --type startup
 
-      # 🔄 Restart Azure Web App (from GitHub Actions)
+      # 🔄 Restart Azure Web App
       - name: 🔄 Restart Web App
         run: |
           az webapp restart --resource-group rg-dmc-mobile-dev --name rg-dmc-mobile-dev
@@ -179,4 +158,4 @@ jobs:
           echo "🎉 Deployment finished!"
           echo "🌍 App URL: https://mobiledev.travclicks.com"
           echo "✔️ Laravel root path ready, caches cleared and optimized"
-          echo "🛠️ Directories created, permissions set"
+          echo "🛠️ NGINX default created and restarted"
