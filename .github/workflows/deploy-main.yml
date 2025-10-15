@@ -69,18 +69,24 @@ jobs:
             --src-path release.zip \
             --type zip
 
-      # 8️⃣ Create required Laravel directories inside wwwroot
-      - name: 📁 Create Laravel storage & bootstrap/cache directories
+      # 8️⃣ Create startup.sh inside container
+      - name: ⚙️ Create startup.sh
         run: |
-          APP_DIR=/home/site/wwwroot
+          cat > startup.sh << 'EOF'
+          #!/bin/bash
+          echo "🔧 Laravel root-path setup on Azure Web App..."
+          
+          APP_DIR="/home/site/wwwroot"
+          
+          # --- Set Laravel directories & permissions ---
           mkdir -p $APP_DIR/storage/framework/{sessions,views,cache/data}
           mkdir -p $APP_DIR/storage/{logs,app/public} $APP_DIR/bootstrap/cache
           chmod -R 775 $APP_DIR/storage $APP_DIR/bootstrap/cache
-
-      # 9️⃣ Create default NGINX file
-      - name: ⚙️ Create default NGINX config
-        run: |
-          cat > /home/site/wwwroot/default << 'EOF'
+          
+          cd $APP_DIR || exit 1
+          
+          # --- NGINX default config ---
+          cat > $APP_DIR/default << 'NGINX_EOF'
           server {
               listen 8080;
           
@@ -104,19 +110,14 @@ jobs:
                   deny all;
               }
           }
-          EOF
-
-      # 🔟 Copy NGINX default file and restart
-      - name: 🔄 Apply NGINX config
-        run: |
-          cp /home/site/wwwroot/default /etc/nginx/sites-available/default
+          NGINX_EOF
+          
+          # --- Apply NGINX config ---
+          cp $APP_DIR/default /etc/nginx/sites-available/default
           cp /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
           nginx -t && service nginx restart
-
-      # 1️⃣1️⃣ Clear and optimize Laravel caches
-      - name: 🧹 Laravel cache & optimization
-        run: |
-          cd /home/site/wwwroot
+          
+          # --- Clear and optimize Laravel caches ---
           php artisan cache:clear || true
           php artisan config:clear || true
           php artisan route:clear || true
@@ -126,19 +127,32 @@ jobs:
           php artisan route:cache || true
           php artisan view:cache || true
           php artisan storage:link || true
+          
+          echo "🎯 Laravel app ready at root, caches cleared, permissions set"
+          EOF
+                    chmod +x startup.sh
 
-      # 1️⃣2️⃣ Restart Azure Web App (from GitHub Actions)
+      # 9️⃣ Upload and run startup.sh inside container
+      - name: 📄 Upload and run startup script
+        run: |
+          az webapp deploy \
+            --resource-group rg-dmc-mobile-dev \
+            --name rg-dmc-mobile-dev \
+            --src-path startup.sh \
+            --type startup
+
+      # 🔄 Restart Azure Web App (from GitHub Actions)
       - name: 🔄 Restart Web App
         run: |
           az webapp restart --resource-group rg-dmc-mobile-dev --name rg-dmc-mobile-dev
 
-      # 1️⃣3️⃣ Verify deployment
+      # 🔎 Verify deployment
       - name: ✅ Verify Deployment
         run: |
           sleep 30
           curl -f https://mobiledev.travclicks.com/ || echo "Application may still be starting"
 
-      # 1️⃣4️⃣ Deployment Summary
+      # 📦 Deployment Summary
       - name: 📦 Deployment Summary
         run: |
           echo "🎉 Deployment finished!"
