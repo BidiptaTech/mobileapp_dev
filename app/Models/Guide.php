@@ -28,4 +28,12 @@ class Guide extends Model
         'close_days' => 'array',
         'close_dates' => 'array',
     ];
+
+    /**
+     * Get the name of the unique identifier for the model for Sanctum tokens
+     */
+    public function getKeyName()
+    {
+        return 'guide_id';
+    }
 }

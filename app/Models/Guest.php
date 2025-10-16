@@ -29,5 +29,13 @@ class Guest extends Model
     {
         return $this->belongsTo(Tour::class, 'tour_id', 'tour_id');
     }
+
+    /**
+     * Get the name of the unique identifier for the model for Sanctum tokens
+     */
+    public function getKeyName()
+    {
+        return 'guest_id';
+    }
 }
 

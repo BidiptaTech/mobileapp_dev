@@ -11,7 +11,6 @@ use App\Models\Jobsheet;
 use App\Models\Tour;
 use App\Models\Vehicle;
 
-
 class AuthController extends Controller
 {
     /**
@@ -92,7 +91,8 @@ class AuthController extends Controller
                 'message' => 'Driver authenticated successfully',
                 'data' => [
                     'driver' => $driver,
-                    'token' => $token
+                    'token' => $token,
+                    'role' => 'driver'
                 ]
             ], 200);
 
@@ -122,8 +122,15 @@ class AuthController extends Controller
                 ], 400);
             }
 
-            // Authenticate guide
-            $guide = Guide::where('email', $email)
+            // Authenticate guide with selected fields
+            $guide = Guide::select([
+                'guide_id', 'name', 'email', 'contact_no', 'description', 'image', 
+                'deleted_at', 'created_at', 'updated_at', 'is_active', 'government_license_no', 
+                'license_image', 'license_exp_date', 'certified', 'experience_years', 
+                'service_type', 'approval', 'close_days', 'close_dates', 'salutation', 
+                'city', 'country', 'created_by', 'status', 'dmc_id', 'guide_gender', 'guide_age'
+            ])
+                ->where('email', $email)
                 ->where('app_password', $password)
                 ->first();
 
@@ -134,6 +141,10 @@ class AuthController extends Controller
                 ], 404);
             }
 
+            // Debug: Check if guide_id exists
+            \Log::info('Guide ID: ' . ($guide->guide_id ?? 'NULL'));
+            \Log::info('Guide getKey(): ' . $guide->getKey());
+            
             // Generate Sanctum token
             $token = $guide->createToken('guide-token')->plainTextToken;
 
@@ -142,7 +153,8 @@ class AuthController extends Controller
                 'message' => 'Guide authenticated successfully',
                 'data' => [
                     'guide' => $guide,
-                    'token' => $token
+                    'token' => $token,
+                    'role' => 'guide'
                 ]
             ], 200);
 
@@ -161,15 +173,13 @@ class AuthController extends Controller
     public function getDriverJobsheets(Request $request)
     {
         try {
-            // Get the authenticated driver from the token
-            $driver_id = $request->driver_id;
-            $auth_user = $request->auth_user;
-            
-            
-            if (!$driver_id) {
+            $driver_id = $request->driver_id; // from middleware
+            $auth_user = auth()->user();
+
+            if($auth_user->driver_id != $driver_id){
                 return response()->json([
                     'success' => false,
-                    'message' => 'Invalid driver token',
+                    'message' => 'Unauthorized',
                 ], 401);
             }
 
@@ -224,13 +234,12 @@ class AuthController extends Controller
     public function getGuideJobsheets(Request $request)
     {
         try {
-            // Get the authenticated guide from the token
-            $guide_id = $request->guide_id;
-            
-            if (!$guide_id) {
+            $guide_id = $request->guide_id; // from middleware
+            $auth_user = auth()->user();
+            if($auth_user->guide_id != $guide_id){
                 return response()->json([
                     'success' => false,
-                    'message' => 'Invalid guide token',
+                    'message' => 'Unauthorized',
                 ], 401);
             }
 
@@ -374,7 +383,8 @@ class AuthController extends Controller
                 'data' => [
                     'guest' => $guest,
                     'tour_counts' => $tourCounts,
-                    'token' => $token
+                    'token' => $token,
+                    'role' => 'guest'
                 ]
             ], 200);
 
@@ -388,18 +398,9 @@ class AuthController extends Controller
     }
     
     public function getGuestBookings(Request $request){
-        $guest_id = $request->guest_id;
+        $guest = $request->guest; // from middleware
         $status_type = $request->status_type;
         $now = now();
-        
-        // Get guest to find their tour_id
-        $guest = Guest::where('guest_id', $guest_id)->first();
-        if (!$guest) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Guest not found',
-            ], 404);
-        }
         
         // Get tours based on status_type using check_in_time and check_out_time
         $toursQuery = Tour::where('tour_id', $guest->tour_id);
@@ -448,7 +449,7 @@ class AuthController extends Controller
     }
 
     function updateGuest(Request $request){
-        $guest = Guest::where('guest_id', $request->id)->first();
+        $guest = $request->guest; // from middleware
         $password = $request->password;
         $guest->app_password = $password;
         $guest->save();
@@ -460,7 +461,7 @@ class AuthController extends Controller
     }
 
     function updateDriver(Request $request){
-        $driver = Driver::where('driver_id', $request->id)->first();
+        $driver = $request->driver; // from middleware
         $password = $request->password;
         $driver->app_password = $password;
         $driver->save();
@@ -472,7 +473,7 @@ class AuthController extends Controller
     }
 
     function updateGuide(Request $request){
-        $guide = Guide::where('guide_id', $request->id)->first();
+        $guide = $request->guide; // from middleware
         $password = $request->password;
         $guide->app_password = $password;
         $guide->save();
