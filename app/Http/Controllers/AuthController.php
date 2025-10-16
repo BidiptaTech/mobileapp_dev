@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
 use App\Models\Order;
 use App\Models\Driver;
 use App\Models\Guide;
@@ -32,18 +33,25 @@ class AuthController extends Controller
             }
 
             // Route to appropriate login function
-            if (Driver::where('email', $email)->where('app_password', $password)->first()) {
+            $driver = Driver::where('email', $email)->first();
+            if ($driver && Hash::check($password, $driver->app_password)) {
                 return $this->driverLogin($request);
-            } elseif (Guide::where('email', $email)->where('app_password', $password)->first()) {
-                return $this->guideLogin($request);
-            } elseif (Guest::where('email', $email)->where('app_password', $password)->first()) {
-                return $this->guestLogin($request);
-            } else {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No user found with this email and password',
-                ], 400);
             }
+            
+            $guide = Guide::where('email', $email)->first();
+            if ($guide && Hash::check($password, $guide->app_password)) {
+                return $this->guideLogin($request);
+            }
+            
+            $guest = Guest::where('email', $email)->first();
+            if ($guest && Hash::check($password, $guest->app_password)) {
+                return $this->guestLogin($request);
+            }
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'No user found with this email and password',
+            ], 400);
 
         } catch (\Exception $e) {
             return response()->json([
@@ -72,11 +80,9 @@ class AuthController extends Controller
             }
 
             // Authenticate driver
-            $driver = Driver::where('email', $email)
-                ->where('app_password', $password)
-                ->first();
+            $driver = Driver::where('email', $email)->first();
 
-            if (!$driver) {
+            if (!$driver || !Hash::check($password, $driver->app_password)) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Driver not found or invalid credentials',
@@ -128,13 +134,13 @@ class AuthController extends Controller
                 'deleted_at', 'created_at', 'updated_at', 'is_active', 'government_license_no', 
                 'license_image', 'license_exp_date', 'certified', 'experience_years', 
                 'service_type', 'approval', 'close_days', 'close_dates', 'salutation', 
-                'city', 'country', 'created_by', 'status', 'dmc_id', 'guide_gender', 'guide_age'
+                'city', 'country', 'created_by', 'status', 'dmc_id', 'guide_gender', 'guide_age',
+                'app_password'
             ])
                 ->where('email', $email)
-                ->where('app_password', $password)
                 ->first();
 
-            if (!$guide) {
+            if (!$guide || !Hash::check($password, $guide->app_password)) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Guide not found or invalid credentials',
@@ -184,20 +190,64 @@ class AuthController extends Controller
             }
 
             // Fetch jobsheets for this driver with vehicle information
-            $jobsheets = Jobsheet::whereNotNull('driver_id')
+            $jobsheets = Jobsheet::select('jobsheet_id', 'driver_id', 'tour_id', 'order_id', 'vehicle_id', 'current_status','date', 'data', 'type', 'service_type', 'journey_time','driver_id')->whereNotNull('driver_id')
                 ->where('driver_id', $driver_id)
                 ->get();
+            $tourIds = $jobsheets
+                ->pluck('tour_id')   // get all tour IDs
+                ->unique()           // keep only unique ones
+                ->values(); 
 
             // Add vehicle information to each jobsheet
             $jobsheetsWithVehicles = $jobsheets->map(function ($jobsheet) {
                 $jobsheetData = $jobsheet->toArray();
                 
+                // Get order data if order_id exists
+                if ($jobsheet->order_id) {
+                    $order = Order::select('data')->where('booking_id', $jobsheet->order_id)->first();
+                    
+                    if ($order && $order->data) {
+                        $orderData = is_string($order->data) ? json_decode($order->data, true) : $order->data;
+                        
+                        if (isset($orderData[0])) {
+                            $data = $orderData[0];
+                            
+                            // Extract only the specified driver fields
+                            $jobsheetData['order_details'] = [
+                                'bookingDate' => $data['bookingDate'] ?? null,
+                                'image' => $data['image'] ?? null,
+                                'type' => $data['type'] ?? null,
+                                'entrypickup' => $data['entrypickup'] ?? null,
+                                'entrydropoff' => $data['entrydropoff'] ?? null,
+                                'PickupPlaceid' => $data['PickupPlaceid'] ?? null,
+                                'DropoffPlaceid' => $data['DropoffPlaceid'] ?? null,
+                                'pickupdate' => $data['pickupdate'] ?? null,
+                                'entrytime' => $data['entrytime'] ?? null,
+                                'adults' => $data['adults'] ?? null,
+                                'children' => $data['children'] ?? null,
+                                'distance' => $data['distance'] ?? null,
+                                'Night_Start_Time' => $data['Night_Start_Time'] ?? null,
+                                'Night_End_Time' => $data['Night_End_Time'] ?? null,
+                                'city' => $data['city'] ?? null,
+                                'country' => $data['country'] ?? null,
+                                
+                            ];
+                        } else {
+                            $jobsheetData['order_details'] = null;
+                        }
+                    } else {
+                        $jobsheetData['order_details'] = null;
+                    }
+                } else {
+                    $jobsheetData['order_details'] = null;
+                }
+                
                 // Get vehicle details if vehicle_id exists
                 if ($jobsheet->vehicle_id) {
                     $vehicle = Vehicle::select([
-                        'id', 'vehicle_id', 'vehicle_name', 'vehicle_type', 'vehicle_model', 
+                        'vehicle_id', 'vehicle_name', 'vehicle_type', 'vehicle_model', 
                         'model_year', 'image', 'description', 'seating_capacity', 'vehicle_icon', 
-                        'is_available', 'dmc_id', 'driver_id', 'created_by'
+                        'is_available'
                     ])
                     ->where('vehicle_id', $jobsheet->vehicle_id)
                     ->first();
@@ -210,11 +260,31 @@ class AuthController extends Controller
                 return $jobsheetData;
             });
 
+            $tourIds = $jobsheets->pluck('tour_id')->unique()->values();
+            $customer_info = [];
+            foreach($tourIds as $tourId){
+                $firstOrder = Order::select('data')->where('tour_id', $tourId)->first();
+                $orderData = is_string($firstOrder->data) ? json_decode($firstOrder->data, true) : $firstOrder->data;
+                if($orderData && isset($orderData[0])){
+                    $customer_info[$tourId] = [
+                        'name' => $orderData[0]['fullName'],
+                        'email' => $orderData[0]['email'],
+                        'phone' => $orderData[0]['phone'],
+                        'address' => $orderData[0]['address1'],
+                        'state' => $orderData[0]['state'],
+                        'zip' => $orderData[0]['zip']
+                    ];
+                }
+                else{
+                    $customer_info[$tourId] = null;
+                }
+            }
             return response()->json([
                 'success' => true,
                 'message' => 'Driver jobsheets retrieved successfully',
                 'data' => [
                     'jobsheets' => $jobsheetsWithVehicles,
+                    'customer_info' => $customer_info,
                     'total_jobsheets' => $jobsheetsWithVehicles->count()
                 ]
             ], 200);
@@ -244,62 +314,80 @@ class AuthController extends Controller
             }
 
             // Fetch jobsheets for this guide with vehicle information
-            $jobsheets = Jobsheet::whereNotNull('guide_id')
+            $jobsheets = Jobsheet::select('jobsheet_id', 'driver_id', 'tour_id', 'order_id', 'vehicle_id', 'current_status','date', 'data', 'type', 'service_type', 'journey_time','guide_id')->whereNotNull('guide_id')
                 ->where('guide_id', $guide_id)
                 ->get();
+            
 
-            // Add vehicle information and order hours to each jobsheet
-            $jobsheetsWithVehicles = $jobsheets->map(function ($jobsheet) {
+            // Add vehicle information and order details to each jobsheet
+            $guideJobsheets = $jobsheets->map(function ($jobsheet) {
                 $jobsheetData = $jobsheet->toArray();
                 
-                // Get vehicle details if vehicle_id exists
-                if ($jobsheet->vehicle_id) {
-                    $vehicle = Vehicle::select([
-                        'id', 'vehicle_id', 'vehicle_name', 'vehicle_type', 'vehicle_model', 
-                        'model_year', 'image', 'description', 'seating_capacity', 'vehicle_icon', 
-                        'is_available', 'dmc_id', 'driver_id', 'created_by'
-                    ])
-                    ->where('vehicle_id', $jobsheet->vehicle_id)
-                    ->first();
-                    
-                    $jobsheetData['vehicle'] = $vehicle;
-                } else {
-                    $jobsheetData['vehicle'] = null;
-                }
-                
-                // Get order hours if order_id exists
-                
+                // Get order data if order_id exists
                 if ($jobsheet->order_id) {
                     $order = Order::select('data')
                         ->where('booking_id', $jobsheet->order_id)
                         ->first();
-                        
                     
                     if ($order && $order->data) {
                         $orderData = is_string($order->data) ? json_decode($order->data, true) : $order->data;
                         
-                        // Extract hours from order data
-                        if (isset($orderData[0]['hours'])) {
-                            $jobsheetData['hours'] = $orderData[0]['hours'];
+                        if (isset($orderData[0])) {
+                            $data = $orderData[0];
+                            
+                            // Extract only the specified fields
+                            $jobsheetData['order_details'] = [
+                                'bookingDate' => $data['bookingDate'] ?? null,
+                                'entrypickup' => $data['entrypickup'] ?? null,
+                                'pickupdate' => $data['pickupdate'] ?? null,
+                                'entrytime' => $data['entrytime'] ?? null,
+                                'adults' => $data['adults'] ?? null,
+                                'children' => $data['children'] ?? null,
+                                'hours' => $data['hours'] ?? null,
+                                'Night_Start_Time' => $data['Night_Start_Time'] ?? null,
+                                'Night_End_Time' => $data['Night_End_Time'] ?? null,
+                                
+                            ];
                         } else {
-                            $jobsheetData['hours'] = null;
+                            $jobsheetData['order_details'] = null;
                         }
                     } else {
-                        $jobsheetData['hours'] = null;
+                        $jobsheetData['order_details'] = null;
                     }
                 } else {
-                    $jobsheetData['hours'] = null;
+                    $jobsheetData['order_details'] = null;
                 }
                 
                 return $jobsheetData;
             });
 
+            $tourIds = $jobsheets->pluck('tour_id')->unique()->values();
+            $customer_info = [];
+            foreach($tourIds as $tourId){
+                $firstOrder = Order::select('data')->where('tour_id', $tourId)->first();
+                $orderData = is_string($firstOrder->data) ? json_decode($firstOrder->data, true) : $firstOrder->data;
+                if($orderData && isset($orderData[0])){
+                    $customer_info[$tourId] = [
+                        'name' => $orderData[0]['fullName'],
+                        'email' => $orderData[0]['email'],
+                        'phone' => $orderData[0]['phone'],
+                        'address' => $orderData[0]['address1'],
+                        'state' => $orderData[0]['state'],
+                        'zip' => $orderData[0]['zip']
+                    ];
+                }
+                else{
+                    $customer_info[$tourId] = null;
+                }
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => 'Guide jobsheets retrieved successfully',
                 'data' => [
-                    'jobsheets' => $jobsheetsWithVehicles,
-                    'total_jobsheets' => $jobsheetsWithVehicles->count()
+                    'jobsheets' => $guideJobsheets,
+                    'total_jobsheets' => $guideJobsheets->count(),
+                    'customer_info' => $customer_info
                 ]
             ], 200);
 
@@ -332,13 +420,12 @@ class AuthController extends Controller
             // Authenticate guest (exclude timestamps from query)
             $guest = Guest::select([
                 'id', 'guest_id', 'tour_id', 'guest_name', 'email', 
-                'contact', 'country_code'
+                'contact', 'country_code', 'app_password'
             ])
                 ->where('email', $email)
-                ->where('app_password', $password)
                 ->first();
 
-            if (!$guest) {
+            if (!$guest || !Hash::check($password, $guest->app_password)) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Guest not found or invalid credentials',
@@ -451,7 +538,7 @@ class AuthController extends Controller
     function updateGuest(Request $request){
         $guest = $request->guest; // from middleware
         $password = $request->password;
-        $guest->app_password = $password;
+        $guest->app_password = Hash::make($password);
         $guest->save();
         return response()->json([
             'success' => true,
@@ -463,7 +550,7 @@ class AuthController extends Controller
     function updateDriver(Request $request){
         $driver = $request->driver; // from middleware
         $password = $request->password;
-        $driver->app_password = $password;
+        $driver->app_password = Hash::make($password);
         $driver->save();
         return response()->json([
             'success' => true,
@@ -475,7 +562,7 @@ class AuthController extends Controller
     function updateGuide(Request $request){
         $guide = $request->guide; // from middleware
         $password = $request->password;
-        $guide->app_password = $password;
+        $guide->app_password = Hash::make($password);
         $guide->save();
         return response()->json([
             'success' => true,
@@ -485,6 +572,8 @@ class AuthController extends Controller
     }
 
     function updateJobsheetStatus(Request $request){
+
+        
         $jobsheet = Jobsheet::where('jobsheet_id', $request->id)->first();
         $jobsheet->current_status = $request->status;
         $jobsheet->save();
