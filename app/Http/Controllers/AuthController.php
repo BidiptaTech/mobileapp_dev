@@ -44,7 +44,7 @@ class AuthController extends Controller
             }
             
             $guest = Guest::where('email', $email)->first();
-            if ($guest && Hash::check($password, $guest->app_password)) {
+            if ($guest && Hash::check($password, $guest->app_password) && $request->user_type == 'guest') {
                 return $this->guestLogin($request);
             }
             
@@ -191,6 +191,7 @@ class AuthController extends Controller
 
             // Fetch jobsheets for this driver with vehicle information
             $jobsheets = Jobsheet::select('jobsheet_id', 'driver_id', 'tour_id', 'order_id', 'vehicle_id', 'current_status','date', 'data', 'type', 'service_type', 'journey_time','driver_id')->whereNotNull('driver_id')
+                ->where('date', '=', today())
                 ->where('driver_id', $driver_id)
                 ->get();
             $tourIds = $jobsheets
@@ -223,6 +224,7 @@ class AuthController extends Controller
                                 'DropoffPlaceid' => $data['DropoffPlaceid'] ?? null,
                                 'pickupdate' => $data['pickupdate'] ?? null,
                                 'entrytime' => $data['entrytime'] ?? null,
+                                'selectedHours' => $data['selectedHours'] ?? null,
                                 'adults' => $data['adults'] ?? null,
                                 'children' => $data['children'] ?? null,
                                 'distance' => $data['distance'] ?? null,
@@ -267,12 +269,12 @@ class AuthController extends Controller
                 $orderData = is_string($firstOrder->data) ? json_decode($firstOrder->data, true) : $firstOrder->data;
                 if($orderData && isset($orderData[0])){
                     $customer_info[$tourId] = [
-                        'name' => $orderData[0]['fullName'],
-                        'email' => $orderData[0]['email'],
-                        'phone' => $orderData[0]['phone'],
-                        'address' => $orderData[0]['address1'],
-                        'state' => $orderData[0]['state'],
-                        'zip' => $orderData[0]['zip']
+                        'name' => $orderData[0]['fullName'] ?? '',
+                        'email' => $orderData[0]['email'] ?? '',
+                        'phone' => $orderData[0]['phone'] ?? '',
+                        'address' => $orderData[0]['address1'] ?? '',
+                        'state' => $orderData[0]['state'] ?? '',
+                        'zip' => $orderData[0]['zip'] ?? ''
                     ];
                 }
                 else{
@@ -314,8 +316,8 @@ class AuthController extends Controller
             }
 
             // Fetch jobsheets for this guide with vehicle information
-            $jobsheets = Jobsheet::select('jobsheet_id', 'driver_id', 'tour_id', 'order_id', 'vehicle_id', 'current_status','date', 'data', 'type', 'service_type', 'journey_time','guide_id')->whereNotNull('guide_id')
-                ->where('guide_id', $guide_id)
+            $jobsheets = Jobsheet::select('jobsheet_id', 'tour_id', 'order_id', 'current_status','date', 'data', 'type', 'service_type', 'journey_time', 'guide_id')->whereNotNull('guide_id')
+                ->where('guide_id', $guide_id)->where('date', '=', today())
                 ->get();
             
 
@@ -344,8 +346,6 @@ class AuthController extends Controller
                                 'adults' => $data['adults'] ?? null,
                                 'children' => $data['children'] ?? null,
                                 'hours' => $data['hours'] ?? null,
-                                'Night_Start_Time' => $data['Night_Start_Time'] ?? null,
-                                'Night_End_Time' => $data['Night_End_Time'] ?? null,
                                 
                             ];
                         } else {
@@ -507,7 +507,7 @@ class AuthController extends Controller
         $toursWithOrders = $tours->map(function ($tour) {
             // Get all orders for this tour (without the tour relationship to avoid duplication)
             $orders = Order::select([
-                'id', 'agent_id', 'tour_id', 'data', 'type', 'status', 
+                'agent_id', 'tour_id', 'data', 'type', 'status', 
                 'booking_id', 'reference_id', 'invoice_pdf', 'bookingType', 
                 'discount', 'markup_percentage', 'cancel_reason', 'approval_file', 
                 'is_approve', 'approval_id', 'actual_due_date', 'display_due_date', 
@@ -583,5 +583,78 @@ class AuthController extends Controller
             'data' => $jobsheet->refresh()
         ], 200);
     }
+
+    /**
+     * Logout function for all user types - receives user_type from frontend
+     */
+    public function logout(Request $request)
+    {
+        try {
+            $userType = $request->input('user_type');
+            
+            // Validate user type
+            if (!$userType || !in_array($userType, ['driver', 'guide', 'guest'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Valid user_type is required (driver, guide, or guest)',
+                ], 400);
+            }
+
+            // Get the authenticated user
+            $user = $request->user();
+            
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'User not authenticated',
+                ], 401);
+            }
+
+            // Verify the user type matches the authenticated user
+            $actualUserType = $this->getUserType($user);
+            
+            if ($actualUserType !== $userType) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'User type mismatch. Expected ' . $userType . ' but authenticated as ' . $actualUserType,
+                ], 400);
+            }
+
+            // Revoke the current token
+            $user->currentAccessToken()->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => ucfirst($userType) . ' logged out successfully',
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error during logout',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Helper function to determine user type based on model
+     */
+    private function getUserType($user)
+    {
+        $className = class_basename(get_class($user));
+        
+        switch ($className) {
+            case 'Driver':
+                return 'driver';
+            case 'Guide':
+                return 'guide';
+            case 'Guest':
+                return 'guest';
+            default:
+                return 'user';
+        }
+    }
+
 
 }
