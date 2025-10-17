@@ -39,12 +39,13 @@ class AuthController extends Controller
             }
             
             $guide = Guide::where('email', $email)->first();
+            
             if ($guide && Hash::check($password, $guide->app_password)) {
                 return $this->guideLogin($request);
             }
             
             $guest = Guest::where('email', $email)->first();
-            if ($guest && Hash::check($password, $guest->app_password) && $request->user_type == 'guest') {
+            if ($guest && Hash::check($password, $guest->app_password)) {
                 return $this->guestLogin($request);
             }
             
