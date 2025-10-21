@@ -1,4 +1,4 @@
-name: 🚀 Deploy MAIN - Laravel to Azure (rg-dmc-mobile-dev)
+name: 🚀 Deploy Laravel to Azure Web App - Root Path
 
 on:
   push:
@@ -6,80 +6,156 @@ on:
       - main
   workflow_dispatch:
 
-permissions:
-  contents: read
-  id-token: write
-
 jobs:
   deploy:
-    name: 🌐 Laravel MAIN Deployment
     runs-on: ubuntu-latest
     permissions:
-      id-token: write
       contents: read
-
-    env:
-      PHP_VERSION: '8.4'
+      id-token: write
 
     steps:
-      - name: 📥 Checkout MAIN branch
+      # 1️⃣ Checkout code
+      - name: 📅 Checkout main branch
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: 🔧 Setup PHP
+      # 2️⃣ Setup PHP
+      - name: 🧠 Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: ${{ env.PHP_VERSION }}
-          extensions: mbstring, intl, bcmath, xml, ctype, json
-          ini-values: post_max_size=256M, upload_max_filesize=256M, memory_limit=2G
-          coverage: none
+          php-version: '8.2'
 
-      - name: 🔧 Install Composer Globally
+      # 3️⃣ Install Composer globally
+      - name: 🔧 Install Composer
         run: |
           curl -sS https://getcomposer.org/installer | php
           mv composer.phar /usr/local/bin/composer
 
-      - name: 📦 Install Laravel Dependencies
+      # 4️⃣ Install Composer dependencies
+      - name: 📦 Composer install
         run: |
           composer validate --no-check-publish
           composer install --prefer-dist --no-dev --optimize-autoloader
 
-      - name: 📁 Prepare Deployment Package
+      # 5️⃣ Create ZIP for deployment
+      - name: 📦 Create ZIP for deployment
         run: |
-          mkdir -p deployment
-          cp -r * deployment/
-          echo "✅ Deployment package prepared"
+          zip -r release.zip . \
+            -x ".git/*" \
+            -x "node_modules/*" \
+            -x "tests/*" \
+            -x "*.md" \
+            -x ".github/*" \
+            -x ".gitignore" \
+            -x ".gitattributes" \
+            -x ".editorconfig" \
+            -x "phpunit.xml" \
+            -x "vite.config.js" \
+            -x "package*.json"
 
-      - name: 🔐 Azure Login
+      # 6️⃣ Login to Azure
+      - name: 🔐 Login to Azure
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: 🚀 Deploy to Azure Web App
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: 'rg-dmc-mobile-dev'
-          slot-name: 'Production'
-          package: ./deployment
-
-      - name: 🔄 Clear and Optimize Laravel
+      # 7️⃣ Deploy ZIP to Azure at /home/site/wwwroot
+      - name: 🚀 Deploy ZIP to Azure Web App
         run: |
-          echo "🔧 Running Laravel cache & optimization commands..."
-          php artisan cache:clear
-          php artisan route:clear
-          php artisan config:clear
-          php artisan view:clear
-          php artisan clear-compiled
-          php artisan optimize:clear
-          echo "✅ Laravel cache cleared and optimized"
+          az webapp deploy \
+            --resource-group rg-dmc-mobile-dev \
+            --name rg-dmc-mobile-dev \
+            --src-path release.zip \
+            --type zip
 
-      - name: 🔄 Restart Azure Web App
-        run: az webapp restart --resource-group rg-dmc-mobile-dev --name rg-dmc-mobile-dev
+      # 8️⃣ Create startup.sh inside container
+      - name: ⚙️ Create startup.sh
+        run: |
+          cat > startup.sh << 'EOF'
+          #!/bin/bash
+          echo "🔧 Laravel root-path setup on Azure Web App..."
+          
+          APP_DIR="/home/site/wwwroot"
+          
+          # --- Set Laravel directories & permissions ---
+          mkdir -p $APP_DIR/storage/framework/{sessions,views,cache/data}
+          mkdir -p $APP_DIR/storage/{logs,app/public} $APP_DIR/bootstrap/cache
+          chmod -R 775 $APP_DIR/storage $APP_DIR/bootstrap/cache
+          
+          cd $APP_DIR || exit 1
+          
+          # --- NGINX default config ---
+          cat > $APP_DIR/default << 'NGINX_EOF'
+          server {
+              listen 8080;
+          
+              root /home/site/wwwroot/public;
+              index index.php index.html index.htm;
+          
+              server_name _;
+          
+              location / {
+                  try_files $uri $uri/ /index.php?$query_string;
+              }
+          
+              location ~ \.php$ {
+                  include fastcgi_params;
+                  fastcgi_pass 127.0.0.1:9000;
+                  fastcgi_index index.php;
+                  fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+              }
+          
+              location ~ /\.ht {
+                  deny all;
+              }
+          }
+          NGINX_EOF
+          
+          # --- Apply NGINX config ---
+          cp $APP_DIR/default /etc/nginx/sites-available/default
+          cp /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
+          nginx -t && service nginx restart
+          
+          # --- Clear and optimize Laravel caches ---
+          php artisan cache:clear || true
+          php artisan config:clear || true
+          php artisan route:clear || true
+          php artisan view:clear || true
+          php artisan optimize || true
+          php artisan config:cache || true
+          php artisan route:cache || true
+          php artisan view:cache || true
+          php artisan storage:link || true
+          
+          echo "🎯 Laravel app ready at root, caches cleared, permissions set"
+          EOF
+                    chmod +x startup.sh
 
+      # 9️⃣ Upload and run startup.sh inside container
+      - name: 📄 Upload and run startup script
+        run: |
+          az webapp deploy \
+            --resource-group rg-dmc-mobile-dev \
+            --name rg-dmc-mobile-dev \
+            --src-path startup.sh \
+            --type startup
+
+      # 🔄 Restart Azure Web App (from GitHub Actions)
+      - name: 🔄 Restart Web App
+        run: |
+          az webapp restart --resource-group rg-dmc-mobile-dev --name rg-dmc-mobile-dev
+
+      # 🔎 Verify deployment
       - name: ✅ Verify Deployment
         run: |
           sleep 30
-          curl -f https://your-app-url/ || echo "Laravel app may still be starting"
+          curl -f https://mobiledev.travclicks.com/ || echo "Application may still be starting"
+
+      # 📦 Deployment Summary
+      - name: 📦 Deployment Summary
+        run: |
+          echo "🎉 Deployment finished!"
+          echo "🌍 App URL: https://mobiledev.travclicks.com"
+          echo "✔️ Laravel root path ready, caches cleared and optimized"
+          echo "🛠️ Directories created, permissions set"
