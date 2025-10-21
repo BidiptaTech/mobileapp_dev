@@ -11,7 +11,11 @@ use App\Models\Guest;
 use App\Models\Jobsheet;
 use App\Models\Tour;
 use App\Models\Vehicle;
-
+use App\Models\City;
+use App\Models\Hotel;
+use App\Models\Attraction;
+use App\Models\Restaurant;
+use App\Models\AppManagement;
 class AuthController extends Controller
 {
     /**
@@ -19,12 +23,10 @@ class AuthController extends Controller
      */
     public function login(Request $request)
     {
-    
         try {
-            
             $email = $request->email;
             $password = $request->password;
-
+            $userType = $request->user_type;
             if (!$email || !$password) {
                 return response()->json([
                     'success' => false,
@@ -34,18 +36,18 @@ class AuthController extends Controller
 
             // Route to appropriate login function
             $driver = Driver::where('email', $email)->first();
-            if ($driver && Hash::check($password, $driver->app_password)) {
+            if ($driver && Hash::check($password, $driver->app_password) && $userType == 'driver') {
                 return $this->driverLogin($request);
             }
             
             $guide = Guide::where('email', $email)->first();
             
-            if ($guide && Hash::check($password, $guide->app_password)) {
+            if ($guide && Hash::check($password, $guide->app_password) && $userType == 'guide') {
                 return $this->guideLogin($request);
             }
             
             $guest = Guest::where('email', $email)->first();
-            if ($guest && Hash::check($password, $guest->app_password)) {
+            if ($guest && Hash::check($password, $guest->app_password) && $userType == 'guest') {
                 return $this->guestLogin($request);
             }
             
@@ -280,6 +282,7 @@ class AuthController extends Controller
                     $customer_info[$tourId] = [
                         'name' => $orderData[0]['fullName'] ?? '',
                         'email' => $orderData[0]['email'] ?? '',
+                        'isContactShared' => $share_status,
                         'phone' => $share_status == 1 ? $orderData[0]['phone'] : 'Not Shared',
                         'address' => $orderData[0]['address1'] ?? '',
                         'state' => $orderData[0]['state'] ?? '',
@@ -388,6 +391,7 @@ class AuthController extends Controller
                     $customer_info[$tourId] = [
                         'name' => $orderData[0]['fullName'],
                         'email' => $orderData[0]['email'],
+                        'isContactShared' => $share_status,
                         'phone' => $share_status == 1 ? $orderData[0]['phone'] : 'Not Shared',
                         'address' => $orderData[0]['address1'],
                         'state' => $orderData[0]['state'],
@@ -479,6 +483,8 @@ class AuthController extends Controller
                 'total' => $totalTours
             ];
 
+            $default_images = AppManagement::select('past_image', 'ongoing_image', 'upcoming_image')->first();
+
             // Generate Sanctum token
             $token = $guest->createToken('guest-token')->plainTextToken;
 
@@ -489,7 +495,8 @@ class AuthController extends Controller
                     'guest' => $guest,
                     'tour_counts' => $tourCounts,
                     'token' => $token,
-                    'role' => 'guest'
+                    'role' => 'guest',
+                    'default_images' => $default_images
                 ]
             ], 200);
 
@@ -534,6 +541,53 @@ class AuthController extends Controller
                 ->without('tour')
                 ->where('tour_id', $tour->tour_id)
                 ->get();
+            // Map orders to include hotel info
+            $orders = $orders->map(function ($order) {
+
+                // Make sure data is decoded as array
+                $orderData = is_array($order->data) ? $order->data : json_decode($order->data, true);
+
+                if ($order->type === 'hotel' && !empty($orderData) && isset($orderData[0]['hotelDetails']['hotel_id'])) {
+                    $hotelId = $orderData[0]['hotelDetails']['hotel_id'];
+
+                    // Fetch hotel from Hotel table
+                    $hotel = Hotel::select('city')
+                                ->where('hotel_unique_id', $hotelId)
+                                ->first();
+
+                    // Add hotel info to order
+                    $order->city = $hotel->city ?? null; // fetched from Hotel table
+                }
+                elseif($order->type == 'attraction' && !empty($orderData) && isset($orderData[0]['AttractionId'])){
+                    $attractionId = $orderData[0]['AttractionId'];
+                    $attraction = Attraction::select('location')
+                                ->where('attraction_id', $attractionId)
+                                ->first();
+                    $order->city = $attraction->location ?? null;
+                }
+                elseif(($order->type == 'travel_point' || $order->type == 'entry_port' || $order->type == 'exit_port' || $order->type == 'travel_hourly' || $order->type == 'local_transport') && !empty($orderData) && isset($orderData[0]['vehicles_id'])){
+                    $vehiclesId = $orderData[0]['vehicles_id'];
+                    $vehicles = Vehicle::select('city')
+                                ->where('vehicle_id', $vehiclesId)
+                                ->first();
+                    $order->city = $vehicles->city ?? null;
+                }
+                elseif($order->type == 'restaurant' && !empty($orderData) && isset($orderData[0]['restaurantId'])){
+                    $restaurantId = $orderData[0]['restaurantId'];
+                    $restaurant = Restaurant::select('city')
+                                ->where('restaurant_id', $restaurantId)
+                                ->first();
+                    $order->city = $restaurant->city ?? null;
+                }
+                elseif($order->type == 'guide' && !empty($orderData) && isset($orderData[0]['guide_id'])){
+                    $guideId = $orderData[0]['guide_id'];
+                    $guide = Guide::select('city')
+                                ->where('guide_id', $guideId)
+                                ->first();
+                    $order->city = $guide->city ?? null;
+                }
+                return $order;
+            });
             
             // Add orders to tour object
             $tourData = $tour->toArray();
@@ -750,9 +804,9 @@ class AuthController extends Controller
     public function exploreCities(Request $request){
         $country = $request->country;
         $city = $request->city;
-        $cityImages = City::select('city_images')->where('country', $country)->get();
+        $cityImages = City::select('image')->where('country', $country)->get();
         $cityImages = $cityImages->map(function ($city) {
-            return $city->city_images;
+            return $city->image;
         });
         if($cityImages->isEmpty()){
             return response()->json([
@@ -766,6 +820,5 @@ class AuthController extends Controller
             'data' => $cityImages
         ], 200);
     }
-
 
 }
