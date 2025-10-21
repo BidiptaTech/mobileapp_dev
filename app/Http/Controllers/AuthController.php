@@ -16,6 +16,8 @@ use App\Models\Hotel;
 use App\Models\Attraction;
 use App\Models\Restaurant;
 use App\Models\AppManagement;
+use Illuminate\Support\Facades\DB;
+
 class AuthController extends Controller
 {
     /**
@@ -30,6 +32,7 @@ class AuthController extends Controller
             if (!$email || !$password) {
                 return response()->json([
                     'success' => false,
+                    'message' => 'Email and password are required',
                     'message' => 'Email and password are required',
                 ], 400);
             }
@@ -50,6 +53,11 @@ class AuthController extends Controller
             if ($guest && Hash::check($password, $guest->app_password) && $userType == 'guest') {
                 return $this->guestLogin($request);
             }
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'No user found with this email and password',
+            ], 400);
             
             return response()->json([
                 'success' => false,
@@ -131,6 +139,7 @@ class AuthController extends Controller
                 ], 400);
             }
 
+            
             // Authenticate guide with selected fields
             $guide = Guide::select([
                 'guide_id', 'name', 'email', 'contact_no', 'description', 'image', 
@@ -150,6 +159,10 @@ class AuthController extends Controller
                 ], 404);
             }
 
+            // Debug: Check if guide_id exists
+            \Log::info('Guide ID: ' . ($guide->guide_id ?? 'NULL'));
+            \Log::info('Guide getKey(): ' . $guide->getKey());
+            
             // Debug: Check if guide_id exists
             \Log::info('Guide ID: ' . ($guide->guide_id ?? 'NULL'));
             \Log::info('Guide getKey(): ' . $guide->getKey());
@@ -586,6 +599,33 @@ class AuthController extends Controller
                                 ->first();
                     $order->city = $guide->city ?? null;
                 }
+                elseif ($order->type == 'attraction_package' && isset($orderData[0]['package_attraction_id'])) {
+                    $packageAttractionId = $orderData[0]['package_attraction_id'];
+                
+                    // Fetch the packaged attraction record
+                    $packagedAttraction = DB::table('packaged_attractions')
+                        ->where('id', $packageAttractionId)
+                        ->first();
+                
+                    if ($packagedAttraction && !empty($packagedAttraction->attractions)) {
+                        // Decode JSON array of attraction IDs
+                        $attractionIds = json_decode($packagedAttraction->attractions, true);
+                
+                        if (is_array($attractionIds) && count($attractionIds) > 0) {
+                            // Fetch the first attraction to get its city (location)
+                            $firstAttraction = DB::table('attractions')
+                                ->select('location')
+                                ->where('id', $attractionIds[0])
+                                ->first();
+                
+                            if ($firstAttraction) {
+                                // Add the city to order data
+                                $order->city = $firstAttraction->location;
+                            }
+                        }
+                    }
+                }
+                
                 return $order;
             });
             
