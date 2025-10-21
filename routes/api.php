@@ -30,6 +30,12 @@ Route::prefix('app/v1')->group(function () {
         // Common routes (accessible by all authenticated users)
         Route::post('/update-jobsheet-status', [AuthController::class, 'updateJobsheetStatus']);
         Route::post('/logout', [AuthController::class, 'logout']);
+
+        Route::post('/delete-account', [AuthController::class, 'deleteAccount']);
+
+        Route::get('/explore-cities', [AuthController::class, 'exploreCities']);
+        Route::post('/share-contact-status', [AuthController::class, 'shareContactStatusUpdate']);
+        
         
         Route::get('/user', function (Request $request) {
             return $request->user();
