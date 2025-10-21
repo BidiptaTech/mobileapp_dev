@@ -198,7 +198,7 @@ class AuthController extends Controller
             $tourIds = $jobsheets
                 ->pluck('tour_id')   // get all tour IDs
                 ->unique()           // keep only unique ones
-                ->values(); 
+                ->values();
 
             // Add vehicle information to each jobsheet
             $jobsheetsWithVehicles = $jobsheets->map(function ($jobsheet) {
@@ -233,7 +233,6 @@ class AuthController extends Controller
                                 'Night_End_Time' => $data['Night_End_Time'] ?? null,
                                 'city' => $data['city'] ?? null,
                                 'country' => $data['country'] ?? null,
-                                
                             ];
                         } else {
                             $jobsheetData['order_details'] = null;
@@ -269,10 +268,19 @@ class AuthController extends Controller
                 $firstOrder = Order::select('data')->where('tour_id', $tourId)->first();
                 $orderData = is_string($firstOrder->data) ? json_decode($firstOrder->data, true) : $firstOrder->data;
                 if($orderData && isset($orderData[0])){
+                    $share_status = null; // default
+
+                    if (!empty($orderData[0]['email'])) {
+                        $guest = Guest::where('tour_id', $tourId)
+                            ->where('email', $orderData[0]['email'])
+                            ->first();
+
+                        $share_status = $guest?->share_status; // null-safe access
+                    }
                     $customer_info[$tourId] = [
                         'name' => $orderData[0]['fullName'] ?? '',
                         'email' => $orderData[0]['email'] ?? '',
-                        'phone' => $orderData[0]['phone'] ?? '',
+                        'phone' => $share_status == 1 ? $orderData[0]['phone'] : 'Not Shared',
                         'address' => $orderData[0]['address1'] ?? '',
                         'state' => $orderData[0]['state'] ?? '',
                         'zip' => $orderData[0]['zip'] ?? ''
@@ -368,10 +376,19 @@ class AuthController extends Controller
                 $firstOrder = Order::select('data')->where('tour_id', $tourId)->first();
                 $orderData = is_string($firstOrder->data) ? json_decode($firstOrder->data, true) : $firstOrder->data;
                 if($orderData && isset($orderData[0])){
+                    $share_status = null; // default
+
+                    if (!empty($orderData[0]['email'])) {
+                        $guest = Guest::where('tour_id', $tourId)
+                            ->where('email', $orderData[0]['email'])
+                            ->first();
+
+                        $share_status = $guest?->share_status; // null-safe access
+                    }
                     $customer_info[$tourId] = [
                         'name' => $orderData[0]['fullName'],
                         'email' => $orderData[0]['email'],
-                        'phone' => $orderData[0]['phone'],
+                        'phone' => $share_status == 1 ? $orderData[0]['phone'] : 'Not Shared',
                         'address' => $orderData[0]['address1'],
                         'state' => $orderData[0]['state'],
                         'zip' => $orderData[0]['zip']
@@ -638,6 +655,53 @@ class AuthController extends Controller
         }
     }
 
+    public function deleteAccount(Request $request)
+    {
+        try {
+            $user = $request->user();
+
+            // Ensure the user is authenticated
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'User not authenticated',
+                ], 401);
+            }
+            $request->validate([
+                'password' => 'required|string',
+            ]);
+            
+            if (!Hash::check($request->password, $user->password)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Incorrect password',
+                ], 403);
+            }
+            
+
+            // Get actual user type
+            $userType = $this->getUserType($user);
+
+            // Optionally revoke all tokens before deletion
+            $user->tokens()->delete();
+
+            // Soft delete the user (if the model uses SoftDeletes)
+            $user->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => ucfirst($userType) . ' account deleted successfully',
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error deleting account',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
     /**
      * Helper function to determine user type based on model
      */
@@ -655,6 +719,52 @@ class AuthController extends Controller
             default:
                 return 'user';
         }
+    }
+
+    public function shareContactStatusUpdate(Request $request){
+        $email = $request->email;
+        $guest_id = $request->guest_id;
+        $share_status = $request->share_status;
+        $guest = Guest::where('guest_id', $guest_id)->where('email', $email)->first();
+        if(!$guest){
+            return response()->json([
+                'success' => false,
+                'message' => 'Guest not found',
+            ], 404);
+        }
+        if(!$share_status){
+            return response()->json([
+                'success' => false,
+                'message' => 'Share status is required',
+            ], 400);
+        }
+        $guest->share_contact = $share_status;
+        $guest->save();
+        return response()->json([
+            'success' => true,
+            'message' => 'Guest share status updated successfully',
+            'data' => $guest
+        ], 200);
+    }
+
+    public function exploreCities(Request $request){
+        $country = $request->country;
+        $city = $request->city;
+        $cityImages = City::select('city_images')->where('country', $country)->get();
+        $cityImages = $cityImages->map(function ($city) {
+            return $city->city_images;
+        });
+        if($cityImages->isEmpty()){
+            return response()->json([
+                'success' => false,
+                'message' => 'No cities found',
+            ], 404);
+        }
+        return response()->json([
+            'success' => true,
+            'message' => 'Cities retrieved successfully',
+            'data' => $cityImages
+        ], 200);
     }
 
 
