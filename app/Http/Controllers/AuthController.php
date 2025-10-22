@@ -764,8 +764,7 @@ class AuthController extends Controller
             $request->validate([
                 'password' => 'required|string',
             ]);
-            
-            if (!Hash::check($request->password, $user->password)) {
+            if (!Hash::check($request->password, $user->app_password)) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Incorrect password',
@@ -826,7 +825,7 @@ class AuthController extends Controller
                 'message' => 'Guest not found',
             ], 404);
         }
-        if(!$share_status){
+        if ($share_status === null) {
             return response()->json([
                 'success' => false,
                 'message' => 'Share status is required',
