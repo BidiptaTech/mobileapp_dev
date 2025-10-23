@@ -580,10 +580,19 @@ class AuthController extends Controller
                 }
                 elseif(($order->type == 'travel_point' || $order->type == 'entry_port' || $order->type == 'exit_port' || $order->type == 'travel_hourly' || $order->type == 'local_transport') && !empty($orderData) && isset($orderData[0]['vehicles_id'])){
                     $vehiclesId = $orderData[0]['vehicles_id'];
-                    $vehicles = Vehicle::select('city')
+                    $vehicles = Vehicle::select('city', 'driver_id')
                                 ->where('vehicle_id', $vehiclesId)
                                 ->first();
                     $order->city = $vehicles->city ?? null;
+                    
+                    // Get driver phone and name if driver_id exists
+                    if ($vehicles && $vehicles->driver_id) {
+                        $driver = Driver::select('phone', 'name')
+                                    ->where('driver_id', $vehicles->driver_id)
+                                    ->first();
+                        $order->driver_phone = $driver->phone ?? null;
+                        $order->driver_name = $driver->name ?? null;
+                    }
                 }
                 elseif($order->type == 'restaurant' && !empty($orderData) && isset($orderData[0]['restaurantId'])){
                     $restaurantId = $orderData[0]['restaurantId'];
@@ -594,10 +603,11 @@ class AuthController extends Controller
                 }
                 elseif($order->type == 'guide' && !empty($orderData) && isset($orderData[0]['guide_id'])){
                     $guideId = $orderData[0]['guide_id'];
-                    $guide = Guide::select('city')
+                    $guide = Guide::select('city', 'contact_no')
                                 ->where('guide_id', $guideId)
                                 ->first();
                     $order->city = $guide->city ?? null;
+                    $order->guide_contact_no = $guide->contact_no ?? null;
                 }
                 elseif ($order->type == 'attraction_package' && isset($orderData[0]['package_attraction_id'])) {
                     $packageAttractionId = $orderData[0]['package_attraction_id'];
