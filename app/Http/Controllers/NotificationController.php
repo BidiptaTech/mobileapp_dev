@@ -13,16 +13,8 @@ class NotificationController extends Controller
     {
         $request->validate([
             'email' => 'required|email',
-            // 'title' => 'nullable|string',
-            // 'body' => 'nullable|string',
-            // 'image' => 'nullable|url',
-            // 'data' => 'nullable|array'
         ]);
         try {
-            // $firebase = (new Factory)->withServiceAccount(storage_path('app/firebase/firebase_credentials.json'));
-            // $database = $firebase->createDatabase();
-            // $messaging = $firebase->createMessaging();
-
             $firebase = (new Factory)
                 ->withServiceAccount(storage_path('app/firebase/firebase_credentials.json'))
                 ->withDatabaseUri('https://travhorse-96ee0-default-rtdb.asia-southeast1.firebasedatabase.app'); // <-- correct URL
