@@ -11,20 +11,20 @@ class NotificationController extends Controller
 {
     public function send(Request $request)
     {
-        // $request->validate([
-        //     'email' => 'required|email',
-        //     'title' => 'required|string',
-        //     'body' => 'required|string',
-        //     'image' => 'nullable|url',
-        //     'data' => 'nullable|array'
-        // ]);
+        $request->validate([
+            'email' => 'required|email',
+            // 'title' => 'nullable|string',
+            // 'body' => 'nullable|string',
+            // 'image' => 'nullable|url',
+            // 'data' => 'nullable|array'
+        ]);
 
         try {
-            $firebase = (new Factory)->withServiceAccount(config('firebase.credentials.file'));
+            $firebase = (new Factory)->withServiceAccount(storage_path('app/firebase/firebase_credentials.json'));
             $database = $firebase->createDatabase();
             $messaging = $firebase->createMessaging();
 
-            $encodedEmail = base64_encode(trim(strtolower('imran@gmail.com')));
+            $encodedEmail = base64_encode(trim(strtolower($request->input('email'))));
             $ref = $database->getReference("user_tokens/{$encodedEmail}");
             $snapshot = $ref->getSnapshot();
 
@@ -43,15 +43,16 @@ class NotificationController extends Controller
             if (empty($tokens)) {
                 return response()->json(['message' => 'No valid tokens found'], 404);
             }
-            $title = "Hello Imran";
-            $body = "How are you?";
-            $image = "https://www.w3schools.com/images/picture.jpg";
+            $title = $request->input('title', 'Hello Imran');
+            $body = $request->input('body', 'How are you?');
+            $image = $request->input('image', 'https://www.w3schools.com/images/picture.jpg');
             // Build Notification & Message
             $notification = Notification::create($title, $body, $image ?? null);
             $message = CloudMessage::new()->withNotification($notification);
 
             // attach data payload if provided
-            if ($data) {
+            $data = $request->input('data', []);
+            if (!empty($data)) {
                 $message = $message->withData($data);
             }
 
