@@ -18,15 +18,21 @@ class NotificationController extends Controller
             // 'image' => 'nullable|url',
             // 'data' => 'nullable|array'
         ]);
-
         try {
-            $firebase = (new Factory)->withServiceAccount(storage_path('app/firebase/firebase_credentials.json'));
+            // $firebase = (new Factory)->withServiceAccount(storage_path('app/firebase/firebase_credentials.json'));
+            // $database = $firebase->createDatabase();
+            // $messaging = $firebase->createMessaging();
+
+            $firebase = (new Factory)
+                ->withServiceAccount(storage_path('app/firebase/firebase_credentials.json'))
+                ->withDatabaseUri('https://travhorse-96ee0-default-rtdb.asia-southeast1.firebasedatabase.app'); // <-- correct URL
             $database = $firebase->createDatabase();
             $messaging = $firebase->createMessaging();
-
+            
             $encodedEmail = base64_encode(trim(strtolower($request->input('email'))));
             $ref = $database->getReference("user_tokens/{$encodedEmail}");
             $snapshot = $ref->getSnapshot();
+            dd(12);
 
             if (!$snapshot->exists()) {
                 return response()->json(['message' => 'No devices registered for this email'], 404);
