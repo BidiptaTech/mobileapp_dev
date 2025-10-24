@@ -694,11 +694,43 @@ class AuthController extends Controller
     }
 
     function updateJobsheetStatus(Request $request){
-
-        
+        // Validate request data
+        $request->validate([
+            'id' => 'required|integer',
+            'status' => 'required|string'
+        ]);
         $jobsheet = Jobsheet::where('jobsheet_id', $request->id)->first();
+        if (!$jobsheet) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Jobsheet not found with the provided ID',
+                'data' => null
+            ], 404);
+        }
+        $tour_id = $jobsheet->tour_id;
+        $guestEmails = Guest::where('tour_id', $tour_id)->pluck('email')->toArray();
+        
+        // Update jobsheet status
         $jobsheet->current_status = $request->status;
         $jobsheet->save();
+        
+        // Send notification to guests if there are any
+        if (!empty($guestEmails)) {
+            $notificationResult = \App\Helpers\NotificationHelper::sendNotificationToGuest(
+                $guestEmails,
+                'Jobsheet Status Updated',
+                "Your jobsheet status has been updated to: {$request->status}",
+                null, // No image for now
+                [
+                    'type' => 'jobsheet_update',
+                    'jobsheet_id' => $request->id,
+                    'status' => $request->status,
+                    'tour_id' => $tour_id
+                ]
+            );
+            
+            \Log::info('Notification sent to guests', ['result' => $notificationResult]);
+        }
         return response()->json([
             'success' => true,
             'message' => 'Jobsheet updated successfully',
