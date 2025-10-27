@@ -712,6 +712,8 @@ class AuthController extends Controller
         
         // Update jobsheet status
         $jobsheet->current_status = $request->status;
+        $jobsheet->reach_time = $request->reach_time ?? '';
+        $jobsheet->comments = $request->comments ? json_encode($request->comments) : json_encode([]);
         $jobsheet->save();
         
         // Send notification to guests if there are any
