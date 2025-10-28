@@ -693,13 +693,16 @@ class AuthController extends Controller
         ], 200);
     }
 
-    function updateJobsheetStatus(Request $request){
+    public function updateJobsheetStatus(Request $request)
+    {
         // Validate request data
         $request->validate([
             'id' => 'required|integer',
-            'status' => 'required|string'
+            'status' => 'required|integer', // status is an integer
         ]);
+
         $jobsheet = Jobsheet::where('jobsheet_id', $request->id)->first();
+
         if (!$jobsheet) {
             return response()->json([
                 'success' => false,
@@ -707,38 +710,70 @@ class AuthController extends Controller
                 'data' => null
             ], 404);
         }
+
         $tour_id = $jobsheet->tour_id;
         $guestEmails = Guest::where('tour_id', $tour_id)->pluck('email')->toArray();
-        
-        // Update jobsheet status
+
+        // Define status mapping based on jobsheet type
+        $driverStatusMap = [
+            1 => 'started',
+            2 => 'arrived',
+            3 => 'picked',
+            4 => 'completed',
+        ];
+
+        $guideStatusMap = [
+            1 => 'started',
+            2 => 'arrived',
+            3 => 'completed',
+        ];
+
+        // Choose the right map based on type
+        $statusMap = ($jobsheet->type === 'driver') ? $driverStatusMap : $guideStatusMap;
+
+        // Get the corresponding status text (fallback to numeric if not found)
+        $statusText = $statusMap[$request->status] ?? $request->status;
+
+        // Update jobsheet fields
         $jobsheet->current_status = $request->status;
         $jobsheet->reach_time = $request->reach_time ?? '';
         $jobsheet->comments = $request->comments ? json_encode($request->comments) : json_encode([]);
         $jobsheet->save();
-        
-        // Send notification to guests if there are any
+
+        // Send notification to guests if any
         if (!empty($guestEmails)) {
+            // Define icon based on status
+            $iconUrl = match($request->status) {
+                1 => 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png', // started - play icon
+                2 => 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png', // arrived - location icon
+                3 => 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png', // picked/completed - check icon
+                4 => 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png', // completed - check icon
+                default => 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' // default notification icon
+            };
+
             $notificationResult = \App\Helpers\NotificationHelper::sendNotificationToGuest(
                 $guestEmails,
                 'Jobsheet Status Updated',
-                "Your jobsheet status has been updated to: {$request->status}",
-                null, // No image for now
+                "Your jobsheet status has been updated to: {$statusText}",
+                $iconUrl,
                 [
                     'type' => 'jobsheet_update',
                     'jobsheet_id' => $request->id,
-                    'status' => $request->status,
+                    'status' => $statusText,
                     'tour_id' => $tour_id
                 ]
             );
-            
+
             \Log::info('Notification sent to guests', ['result' => $notificationResult]);
         }
+
         return response()->json([
             'success' => true,
             'message' => 'Jobsheet updated successfully',
             'data' => $jobsheet->refresh()
         ], 200);
     }
+
 
     /**
      * Logout function for all user types - receives user_type from frontend
