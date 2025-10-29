@@ -580,10 +580,19 @@ class AuthController extends Controller
                 }
                 elseif(($order->type == 'travel_point' || $order->type == 'entry_port' || $order->type == 'exit_port' || $order->type == 'travel_hourly' || $order->type == 'local_transport') && !empty($orderData) && isset($orderData[0]['vehicles_id'])){
                     $vehiclesId = $orderData[0]['vehicles_id'];
-                    $vehicles = Vehicle::select('city')
+                    $vehicles = Vehicle::select('city', 'driver_id')
                                 ->where('vehicle_id', $vehiclesId)
                                 ->first();
                     $order->city = $vehicles->city ?? null;
+                    
+                    // Get driver phone and name if driver_id exists
+                    if ($vehicles && $vehicles->driver_id) {
+                        $driver = Driver::select('phone', 'name')
+                                    ->where('driver_id', $vehicles->driver_id)
+                                    ->first();
+                        $order->driver_phone = $driver->phone ?? null;
+                        $order->driver_name = $driver->name ?? null;
+                    }
                 }
                 elseif($order->type == 'restaurant' && !empty($orderData) && isset($orderData[0]['restaurantId'])){
                     $restaurantId = $orderData[0]['restaurantId'];
@@ -594,10 +603,11 @@ class AuthController extends Controller
                 }
                 elseif($order->type == 'guide' && !empty($orderData) && isset($orderData[0]['guide_id'])){
                     $guideId = $orderData[0]['guide_id'];
-                    $guide = Guide::select('city')
+                    $guide = Guide::select('city', 'contact_no')
                                 ->where('guide_id', $guideId)
                                 ->first();
                     $order->city = $guide->city ?? null;
+                    $order->guide_contact_no = $guide->contact_no ?? null;
                 }
                 elseif ($order->type == 'attraction_package' && isset($orderData[0]['package_attraction_id'])) {
                     $packageAttractionId = $orderData[0]['package_attraction_id'];
@@ -683,18 +693,87 @@ class AuthController extends Controller
         ], 200);
     }
 
-    function updateJobsheetStatus(Request $request){
+    public function updateJobsheetStatus(Request $request)
+    {
+        // Validate request data
+        $request->validate([
+            'id' => 'required|integer',
+            'status' => 'required|integer', // status is an integer
+        ]);
 
-        
         $jobsheet = Jobsheet::where('jobsheet_id', $request->id)->first();
+
+        if (!$jobsheet) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Jobsheet not found with the provided ID',
+                'data' => null
+            ], 404);
+        }
+
+        $tour_id = $jobsheet->tour_id;
+        $guestEmails = Guest::where('tour_id', $tour_id)->pluck('email')->toArray();
+
+        // Define status mapping based on jobsheet type
+        $driverStatusMap = [
+            1 => 'started',
+            2 => 'arrived',
+            3 => 'picked',
+            4 => 'completed',
+        ];
+
+        $guideStatusMap = [
+            1 => 'started',
+            2 => 'arrived',
+            3 => 'completed',
+        ];
+
+        // Choose the right map based on type
+        $statusMap = ($jobsheet->type === 'driver') ? $driverStatusMap : $guideStatusMap;
+
+        // Get the corresponding status text (fallback to numeric if not found)
+        $statusText = $statusMap[$request->status] ?? $request->status;
+
+        // Update jobsheet fields
         $jobsheet->current_status = $request->status;
+        $jobsheet->reach_time = $request->reach_time ?? '';
+        $jobsheet->comments = $request->comments ? json_encode($request->comments) : json_encode([]);
         $jobsheet->save();
+
+        // Send notification to guests if any
+        if (!empty($guestEmails)) {
+            // Define icon based on status
+            $iconUrl = match($request->status) {
+                1 => 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png', // started - play icon
+                2 => 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png', // arrived - location icon
+                3 => 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png', // picked/completed - check icon
+                4 => 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png', // completed - check icon
+                default => 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' // default notification icon
+            };
+
+            $notificationResult = \App\Helpers\NotificationHelper::sendNotificationToGuest(
+                $guestEmails,
+                'Jobsheet Status Updated',
+                "Your jobsheet status has been updated to: {$statusText}",
+                $iconUrl,
+                [
+                    'type' => 'jobsheet_update',
+                    'jobsheet_id' => $request->id,
+                    'status' => $statusText,
+                    'tour_id' => $tour_id
+                ]
+            );
+
+            \Log::info('Notification sent to guests', ['result' => $notificationResult]);
+        }
+
         return response()->json([
             'success' => true,
             'message' => 'Jobsheet updated successfully',
             'data' => $jobsheet->refresh()
         ], 200);
     }
+
 
     /**
      * Logout function for all user types - receives user_type from frontend
