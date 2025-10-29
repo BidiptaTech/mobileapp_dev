@@ -17,6 +17,7 @@ use App\Models\Attraction;
 use App\Models\Restaurant;
 use App\Models\AppManagement;
 use Illuminate\Support\Facades\DB;
+use App\Models\CityExploration;
 
 class AuthController extends Controller
 {
@@ -922,20 +923,18 @@ class AuthController extends Controller
     public function exploreCities(Request $request){
         $country = $request->country;
         $city = $request->city;
-        $cityImages = City::select('image')->where('country', $country)->get();
-        $cityImages = $cityImages->map(function ($city) {
-            return $city->image;
-        });
-        if($cityImages->isEmpty()){
+        $cityData = City::select('city_id', 'name', 'image')->where('country', $country)->first();
+        $city_exploration = CityExploration::where('city_id', $cityData->city_id)->first();
+        if(!$city_exploration){
             return response()->json([
                 'success' => false,
-                'message' => 'No cities found',
+                'message' => 'City exploration not found',
             ], 404);
         }
         return response()->json([
             'success' => true,
-            'message' => 'Cities retrieved successfully',
-            'data' => $cityImages
+            'message' => 'City exploration retrieved successfully',
+            'data' => $city_exploration
         ], 200);
     }
 
@@ -1088,7 +1087,6 @@ class AuthController extends Controller
                 $jobsheets = Jobsheet::select('jobsheet_id', 'tour_id', 'order_id', 'current_status','date', 'data', 'type', 'service_type', 'journey_time', 'guide_id')->whereNotNull('guide_id')
                     ->where('guide_id', $guide_id)->where('date', '=', now()->addDay()->toDateString())
                     ->get();
-                
     
                 // Add vehicle information and order details to each jobsheet
                 $guideJobsheets = $jobsheets->map(function ($jobsheet) {
