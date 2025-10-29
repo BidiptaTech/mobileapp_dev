@@ -939,4 +939,245 @@ class AuthController extends Controller
         ], 200);
     }
 
+    public function upcomingTours(Request $request){
+        $userType = $request->user_type;
+
+        if($userType == 'driver'){
+            try {
+                $driver_id = $request->driver_id; // from middleware
+                $auth_user = auth()->user();
+    
+                if($auth_user->driver_id != $driver_id){
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Unauthorized',
+                    ], 401);
+                }
+    
+                // Fetch jobsheets for this driver with vehicle information
+                $jobsheets = Jobsheet::select('jobsheet_id', 'driver_id', 'tour_id', 'order_id', 'vehicle_id', 'current_status','date', 'data', 'type', 'service_type', 'journey_time','driver_id')->whereNotNull('driver_id')
+                    ->where('date', '=', now()->addDay()->toDateString())
+                    ->where('driver_id', $driver_id)
+                    ->get();
+                $tourIds = $jobsheets
+                    ->pluck('tour_id')   // get all tour IDs
+                    ->unique()           // keep only unique ones
+                    ->values();
+    
+                // Add vehicle information to each jobsheet
+                $jobsheetsWithVehicles = $jobsheets->map(function ($jobsheet) {
+                    $jobsheetData = $jobsheet->toArray();
+                    
+                    // Get order data if order_id exists
+                    if ($jobsheet->order_id) {
+                        $order = Order::select('data')->where('booking_id', $jobsheet->order_id)->first();
+                        
+                        if ($order && $order->data) {
+                            $orderData = is_string($order->data) ? json_decode($order->data, true) : $order->data;
+                            
+                            if (isset($orderData[0])) {
+                                $data = $orderData[0];
+                                
+                                // Extract only the specified driver fields
+                                $jobsheetData['order_details'] = [
+                                    'bookingDate' => $data['bookingDate'] ?? null,
+                                    'image' => $data['image'] ?? null,
+                                    'type' => $data['type'] ?? null,
+                                    'entrypickup' => $data['entrypickup'] ?? null,
+                                    'entrydropoff' => $data['entrydropoff'] ?? null,
+                                    'PickupPlaceid' => $data['PickupPlaceid'] ?? null,
+                                    'DropoffPlaceid' => $data['DropoffPlaceid'] ?? null,
+                                    'pickupdate' => $data['pickupdate'] ?? null,
+                                    'entrytime' => $data['entrytime'] ?? null,
+                                    'selectedHours' => $data['selectedHours'] ?? null,
+                                    'adults' => $data['adults'] ?? null,
+                                    'children' => $data['children'] ?? null,
+                                    'distance' => $data['distance'] ?? null,
+                                    'Night_Start_Time' => $data['Night_Start_Time'] ?? null,
+                                    'Night_End_Time' => $data['Night_End_Time'] ?? null,
+                                    'city' => $data['city'] ?? null,
+                                    'country' => $data['country'] ?? null,
+                                ];
+                            } else {
+                                $jobsheetData['order_details'] = null;
+                            }
+                        } else {
+                            $jobsheetData['order_details'] = null;
+                        }
+                    } else {
+                        $jobsheetData['order_details'] = null;
+                    }
+                    
+                    // Get vehicle details if vehicle_id exists
+                    if ($jobsheet->vehicle_id) {
+                        $vehicle = Vehicle::select([
+                            'vehicle_id', 'vehicle_name', 'vehicle_type', 'vehicle_model', 
+                            'model_year', 'image', 'description', 'seating_capacity', 'vehicle_icon', 
+                            'is_available'
+                        ])
+                        ->where('vehicle_id', $jobsheet->vehicle_id)
+                        ->first();
+                        
+                        $jobsheetData['vehicle'] = $vehicle;
+                    } else {
+                        $jobsheetData['vehicle'] = null;
+                    }
+                    
+                    return $jobsheetData;
+                });
+    
+                $tourIds = $jobsheets->pluck('tour_id')->unique()->values();
+                $customer_info = [];
+                foreach($tourIds as $tourId){
+                    $firstOrder = Order::select('data')->where('tour_id', $tourId)->first();
+                    $orderData = is_string($firstOrder->data) ? json_decode($firstOrder->data, true) : $firstOrder->data;
+                    if($orderData && isset($orderData[0])){
+                        $share_status = null; // default
+    
+                        if (!empty($orderData[0]['email'])) {
+                            $guest = Guest::where('tour_id', $tourId)
+                                ->where('email', $orderData[0]['email'])
+                                ->first();
+    
+                            $share_status = $guest?->share_status; // null-safe access
+                        }
+                        $customer_info[$tourId] = [
+                            'name' => $orderData[0]['fullName'] ?? '',
+                            'email' => $orderData[0]['email'] ?? '',
+                            'isContactShared' => $share_status,
+                            'phone' => $share_status == 1 ? $orderData[0]['phone'] : 'Not Shared',
+                            'address' => $orderData[0]['address1'] ?? '',
+                            'state' => $orderData[0]['state'] ?? '',
+                            'zip' => $orderData[0]['zip'] ?? ''
+                        ];
+                    }
+                    else{
+                        $customer_info[$tourId] = null;
+                    }
+                }
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Driver jobsheets retrieved successfully',
+                    'data' => [
+                        'jobsheets' => $jobsheetsWithVehicles,
+                        'customer_info' => $customer_info,
+                        'total_jobsheets' => $jobsheetsWithVehicles->count()
+                    ]
+                ], 200);
+    
+            } catch (\Exception $e) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Error retrieving driver jobsheets',
+                    'error' => $e->getMessage()
+                ], 500);
+            }
+        }
+        elseif($userType == 'guide'){
+            try {
+                $guide_id = $request->guide_id; // from middleware
+                $auth_user = auth()->user();
+                if($auth_user->guide_id != $guide_id){
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Unauthorized',
+                    ], 401);
+                }
+    
+                // Fetch jobsheets for this guide with vehicle information
+                $jobsheets = Jobsheet::select('jobsheet_id', 'tour_id', 'order_id', 'current_status','date', 'data', 'type', 'service_type', 'journey_time', 'guide_id')->whereNotNull('guide_id')
+                    ->where('guide_id', $guide_id)->where('date', '=', now()->addDay()->toDateString())
+                    ->get();
+                
+    
+                // Add vehicle information and order details to each jobsheet
+                $guideJobsheets = $jobsheets->map(function ($jobsheet) {
+                    $jobsheetData = $jobsheet->toArray();
+                    
+                    // Get order data if order_id exists
+                    if ($jobsheet->order_id) {
+                        $order = Order::select('data')
+                            ->where('booking_id', $jobsheet->order_id)
+                            ->first();
+                        
+                        if ($order && $order->data) {
+                            $orderData = is_string($order->data) ? json_decode($order->data, true) : $order->data;
+                            
+                            if (isset($orderData[0])) {
+                                $data = $orderData[0];
+                                
+                                // Extract only the specified fields
+                                $jobsheetData['order_details'] = [
+                                    'bookingDate' => $data['bookingDate'] ?? null,
+                                    'entrypickup' => $data['entrypickup'] ?? null,
+                                    'pickupdate' => $data['pickupdate'] ?? null,
+                                    'entrytime' => $data['entrytime'] ?? null,
+                                    'adults' => $data['adults'] ?? null,
+                                    'children' => $data['children'] ?? null,
+                                    'hours' => $data['hours'] ?? null,
+                                    
+                                ];
+                            } else {
+                                $jobsheetData['order_details'] = null;
+                            }
+                        } else {
+                            $jobsheetData['order_details'] = null;
+                        }
+                    } else {
+                        $jobsheetData['order_details'] = null;
+                    }
+                    
+                    return $jobsheetData;
+                });
+    
+                $tourIds = $jobsheets->pluck('tour_id')->unique()->values();
+                $customer_info = [];
+                foreach($tourIds as $tourId){
+                    $firstOrder = Order::select('data')->where('tour_id', $tourId)->first();
+                    $orderData = is_string($firstOrder->data) ? json_decode($firstOrder->data, true) : $firstOrder->data;
+                    if($orderData && isset($orderData[0])){
+                        $share_status = null; // default
+    
+                        if (!empty($orderData[0]['email'])) {
+                            $guest = Guest::where('tour_id', $tourId)
+                                ->where('email', $orderData[0]['email'])
+                                ->first();
+    
+                            $share_status = $guest?->share_status; // null-safe access
+                        }
+                        $customer_info[$tourId] = [
+                            'name' => $orderData[0]['fullName'],
+                            'email' => $orderData[0]['email'],
+                            'isContactShared' => $share_status,
+                            'phone' => $share_status == 1 ? $orderData[0]['phone'] : 'Not Shared',
+                            'address' => $orderData[0]['address1'],
+                            'state' => $orderData[0]['state'],
+                            'zip' => $orderData[0]['zip']
+                        ];
+                    }
+                    else{
+                        $customer_info[$tourId] = null;
+                    }
+                }
+    
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Guide jobsheets retrieved successfully',
+                    'data' => [
+                        'jobsheets' => $guideJobsheets,
+                        'total_jobsheets' => $guideJobsheets->count(),
+                        'customer_info' => $customer_info
+                    ]
+                ], 200);
+    
+            } catch (\Exception $e) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Error retrieving guide jobsheets',
+                    'error' => $e->getMessage()
+                ], 500);
+            }
+        }
+    }
+
 }
