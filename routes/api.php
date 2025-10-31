@@ -37,7 +37,7 @@ Route::prefix('app/v1')->group(function () {
 
         Route::get('/explore-cities', [AuthController::class, 'exploreCities']);
         Route::post('/share-contact-status', [AuthController::class, 'shareContactStatusUpdate']);
-        
+        Route::get('/upcoming-tours', [AuthController::class, 'upcomingTours']);
         
         Route::get('/user', function (Request $request) {
             return $request->user();
