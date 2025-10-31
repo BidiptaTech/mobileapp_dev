@@ -811,34 +811,47 @@ class AuthController extends Controller
                 default => 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' // default notification icon
             };
 
-            // Build title and body including driver/guide details
+            // Build title and body including driver/guide details (conditional on jobsheet type)
             $title = 'Jobsheet Status Updated - ' . $statusText;
-            $body = 'Status: ' . $statusText
-                . ' | Driver: #' . $driverIdForMsg . ' ' . $driverNameForMsg
-                . ' | Guide: ' . $guideNameForMsg
-                . ' | Vehicle: ' . $vehicleNameForMsg . ($vehicleNumberForMsg ? ' (' . $vehicleNumberForMsg . ')' : '')
-                . ' | Pickup: ' . ($pickupLocation ?? 'N/A')
-                . ' | Drop: ' . ($dropLocation ?? 'N/A')
-                . (!empty($commentsText) ? ' | Comments: ' . $commentsText : '');
+            $bodyParts = [];
+            $bodyParts[] = 'Status: ' . $statusText;
+            if ($jobsheet->type === 'guide') {
+                // For guide jobsheets: send guide name
+                $bodyParts[] = 'Guide: ' . $guideNameForMsg;
+            } else {
+                // For driver jobsheets: show driver and vehicle details (and locations/comments when available)
+                $bodyParts[] = 'Driver: #' . $driverIdForMsg . ' ' . $driverNameForMsg;
+                $bodyParts[] = 'Vehicle: ' . $vehicleNameForMsg . ($vehicleNumberForMsg ? ' (' . $vehicleNumberForMsg . ')' : '');
+                if ($pickupLocation) { $bodyParts[] = 'Pickup: ' . $pickupLocation; }
+                if ($dropLocation) { $bodyParts[] = 'Drop: ' . $dropLocation; }
+                if (!empty($commentsText)) { $bodyParts[] = 'Comments: ' . $commentsText; }
+            }
+            $body = implode(' | ', array_filter($bodyParts));
+
+            // Build data payload conditionally
+            $dataPayload = [
+                'type' => 'jobsheet_update',
+                'jobsheet_id' => $request->id,
+                'status' => $statusText,
+                'tour_id' => $tour_id,
+            ];
+            if ($jobsheet->type === 'guide') {
+                $dataPayload['guide_name'] = $guide ? $guide->name : null;
+            } else {
+                $dataPayload['driver_name'] = $driver ? $driver->name : null;
+                $dataPayload['vehicle_name'] = $vehicleNameForMsg !== 'N/A' ? $vehicleNameForMsg : null;
+                $dataPayload['vehicle_number'] = $vehicleNumberForMsg;
+                $dataPayload['pickup_location'] = $pickupLocation;
+                $dataPayload['drop_location'] = $dropLocation;
+                $dataPayload['comments'] = $commentsDecoded;
+            }
 
             $notificationResult = \App\Helpers\NotificationHelper::sendNotificationToGuest(
                 $guestEmails,
                 $title,
                 $body,
                 $iconUrl,
-                [
-                    'type' => 'jobsheet_update',
-                    'jobsheet_id' => $request->id,
-                    'status' => $statusText,
-                    'tour_id' => $tour_id,
-                    'driver_name' => $driver ? $driver->name : null,
-                    'guide_name' => $guide ? $guide->name : null,
-                    'vehicle_name' => $vehicleNameForMsg !== 'N/A' ? $vehicleNameForMsg : null,
-                    'vehicle_number' => $vehicleNumberForMsg,
-                    'pickup_location' => $pickupLocation,
-                    'drop_location' => $dropLocation,
-                    'comments' => $commentsDecoded,
-                ]
+                $dataPayload
             );
 
             \Log::info('Notification sent to guests', ['result' => $notificationResult]);
