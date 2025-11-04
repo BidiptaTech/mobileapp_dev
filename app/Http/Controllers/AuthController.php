@@ -574,6 +574,7 @@ class AuthController extends Controller
 
                     // Add hotel info to order
                     $order->city = $hotel->city ?? null; // fetched from Hotel table
+                    $order->phone = $hotel->phone ?? null;
                 }
                 elseif($order->type == 'attraction' && !empty($orderData) && isset($orderData[0]['AttractionId'])){
                     $attractionId = $orderData[0]['AttractionId'];
@@ -581,6 +582,7 @@ class AuthController extends Controller
                                 ->where('attraction_id', $attractionId)
                                 ->first();
                     $order->city = $attraction->location ?? null;
+                    $order->phone = $attraction->phone ?? null;
                 }
                 elseif(($order->type == 'travel_point' || $order->type == 'entry_port' || $order->type == 'exit_port' || $order->type == 'travel_hourly' || $order->type == 'local_transport') && !empty($orderData)){
                     // Get vehicle_id and driver_id from jobsheet table for this specific order
@@ -634,6 +636,7 @@ class AuthController extends Controller
                                 ->where('restaurant_id', $restaurantId)
                                 ->first();
                     $order->city = $restaurant->city ?? null;
+                    $order->phone = $restaurant->phone ?? null;
                 }
                 elseif($order->type == 'guide' && !empty($orderData)){
                     // Get guide_id from jobsheet table for this specific order
