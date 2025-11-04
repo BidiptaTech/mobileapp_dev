@@ -18,6 +18,7 @@ use App\Models\Restaurant;
 use App\Models\AppManagement;
 use Illuminate\Support\Facades\DB;
 use App\Models\CityExploration;
+use App\Models\Country;
 
 class AuthController extends Controller
 {
@@ -51,14 +52,10 @@ class AuthController extends Controller
             }
             
             $guest = Guest::where('email', $email)->first();
+            
             if ($guest && Hash::check($password, $guest->app_password) && $userType == 'guest') {
                 return $this->guestLogin($request);
             }
-            
-            return response()->json([
-                'success' => false,
-                'message' => 'No user found with this email and password',
-            ], 400);
             
             return response()->json([
                 'success' => false,
@@ -456,7 +453,7 @@ class AuthController extends Controller
             // Authenticate guest (exclude timestamps from query)
             $guest = Guest::select([
                 'id', 'guest_id', 'tour_id', 'guest_name', 'email', 
-                'contact', 'country_code', 'app_password'
+                'contact', 'country_code', 'app_password', 'image'
             ])
                 ->where('email', $email)
                 ->first();
@@ -468,8 +465,11 @@ class AuthController extends Controller
                 ], 404);
             }
 
+            // Decode tour_id JSON array
+            $tourIds = is_array($guest->tour_id) ? $guest->tour_id : json_decode($guest->tour_id, true);
+            
             // Get all tours for this guest's tour_id to calculate counts
-            $tours = Tour::where('tour_id', $guest->tour_id)->get();
+            $tours = Tour::whereIn('tour_id', $tourIds)->get();
             
             $now = now();
             
@@ -528,8 +528,11 @@ class AuthController extends Controller
         $status_type = $request->status_type;
         $now = now();
         
+        // Decode tour_id JSON array
+        $tourIds = is_array($guest->tour_id) ? $guest->tour_id : json_decode($guest->tour_id, true);
+        
         // Get tours based on status_type using check_in_time and check_out_time
-        $toursQuery = Tour::where('tour_id', $guest->tour_id);
+        $toursQuery = Tour::whereIn('tour_id', $tourIds);
         
         if($status_type == 'past'){
             $toursQuery->where('check_out_time', '<', $now);
@@ -579,20 +582,48 @@ class AuthController extends Controller
                                 ->first();
                     $order->city = $attraction->location ?? null;
                 }
-                elseif(($order->type == 'travel_point' || $order->type == 'entry_port' || $order->type == 'exit_port' || $order->type == 'travel_hourly' || $order->type == 'local_transport') && !empty($orderData) && isset($orderData[0]['vehicles_id'])){
-                    $vehiclesId = $orderData[0]['vehicles_id'];
-                    $vehicles = Vehicle::select('city', 'driver_id')
-                                ->where('vehicle_id', $vehiclesId)
+                elseif(($order->type == 'travel_point' || $order->type == 'entry_port' || $order->type == 'exit_port' || $order->type == 'travel_hourly' || $order->type == 'local_transport') && !empty($orderData)){
+                    // Get vehicle_id and driver_id from jobsheet table for this specific order
+                    $jobsheet = DB::table('jobsheets')
+                                ->select('vehicle_id', 'driver_id')
+                                ->where('order_id', $order->booking_id)
+                                ->where('type', $order->type)
                                 ->first();
-                    $order->city = $vehicles->city ?? null;
                     
-                    // Get driver phone and name if driver_id exists
-                    if ($vehicles && $vehicles->driver_id) {
-                        $driver = Driver::select('phone', 'name')
-                                    ->where('driver_id', $vehicles->driver_id)
+                    if ($jobsheet) {
+                        // Get vehicle city
+                        if ($jobsheet->vehicle_id) {
+                            $vehicle = Vehicle::select('city')
+                                        ->where('vehicle_id', $jobsheet->vehicle_id)
+                                        ->first();
+                            $order->city = $vehicle->city ?? null;
+                        }
+                        
+                        // Get driver info
+                        if ($jobsheet->driver_id) {
+                            $driver = Driver::select('phone', 'name')
+                                        ->where('driver_id', $jobsheet->driver_id)
+                                        ->first();
+                            if ($driver) {
+                                $order->driver_name = $driver->name;
+                                $order->driver_phone = $driver->phone;
+                            }
+                        }
+                    }else{
+                        $vehiclesId = $orderData[0]['vehicles_id'];
+                        $vehicles = Vehicle::select('city', 'driver_id')
+                                    ->where('vehicle_id', $vehiclesId)
                                     ->first();
-                        $order->driver_phone = $driver->phone ?? null;
-                        $order->driver_name = $driver->name ?? null;
+                        $order->city = $vehicles->city ?? null;
+                        
+                        // Get driver phone and name if driver_id exists
+                        if ($vehicles && $vehicles->driver_id) {
+                            $driver = Driver::select('phone', 'name')
+                                        ->where('driver_id', $vehicles->driver_id)
+                                        ->first();
+                            $order->driver_phone = $driver->phone ?? null;
+                            $order->driver_name = $driver->name ?? null;
+                        }
                     }
                 }
                 elseif($order->type == 'restaurant' && !empty($orderData) && isset($orderData[0]['restaurantId'])){
@@ -602,20 +633,43 @@ class AuthController extends Controller
                                 ->first();
                     $order->city = $restaurant->city ?? null;
                 }
-                elseif($order->type == 'guide' && !empty($orderData) && isset($orderData[0]['guide_id'])){
-                    $guideId = $orderData[0]['guide_id'];
-                    $guide = Guide::select('city', 'contact_no')
-                                ->where('guide_id', $guideId)
+                elseif($order->type == 'guide' && !empty($orderData)){
+                    // Get guide_id from jobsheet table for this specific order
+                    $jobsheet = DB::table('jobsheets')
+                                ->select('guide_id')
+                                ->where('order_id', $order->booking_id)
+                                ->where('type', 'guide')
                                 ->first();
-                    $order->city = $guide->city ?? null;
-                    $order->guide_contact_no = $guide->contact_no ?? null;
+                    
+                    if ($jobsheet && $jobsheet->guide_id) {
+                        // Get guide info using guide_id from jobsheet
+                        $guide = Guide::select('city', 'contact_no', 'name')
+                                    ->where('guide_id', $jobsheet->guide_id)
+                                    ->first();
+                        if ($guide) {
+                            $order->city = $guide->city;
+                            $order->guide_contact_no = $guide->contact_no;
+                            $order->guide_name = $guide->name;
+                        }
+                    }
+                    else if(isset($orderData[0]['guide_id'])){
+                        $guideId = $orderData[0]['guide_id'];
+                        $guide = Guide::select('city', 'contact_no', 'name')
+                                    ->where('guide_id', $guideId)
+                                    ->first();
+                        if ($guide) {
+                            $order->city = $guide->city;
+                            $order->guide_contact_no = $guide->contact_no;
+                            $order->guide_name = $guide->name;
+                        }
+                    }
                 }
                 elseif ($order->type == 'attraction_package' && isset($orderData[0]['package_attraction_id'])) {
                     $packageAttractionId = $orderData[0]['package_attraction_id'];
                 
                     // Fetch the packaged attraction record
                     $packagedAttraction = DB::table('packaged_attractions')
-                        ->where('id', $packageAttractionId)
+                        ->where('packaged_attraction_id', $packageAttractionId)
                         ->first();
                 
                     if ($packagedAttraction && !empty($packagedAttraction->attractions)) {
@@ -626,7 +680,7 @@ class AuthController extends Controller
                             // Fetch the first attraction to get its city (location)
                             $firstAttraction = DB::table('attractions')
                                 ->select('location')
-                                ->where('id', $attractionIds[0])
+                                ->where('attraction_id', $attractionIds[0])
                                 ->first();
                 
                             if ($firstAttraction) {
@@ -641,6 +695,11 @@ class AuthController extends Controller
             });
             
             // Add orders to tour object
+            $destination = $tour->destination;
+            $country = Country::select('country_image')
+                                ->where('name', $destination)
+                                ->first();
+            $tour->destination_image = $country->country_image ?? null;
             $tourData = $tour->toArray();
             $tourData['orders'] = $orders;
             $tourData['total_orders'] = $orders->count();
@@ -774,7 +833,6 @@ class AuthController extends Controller
             'data' => $jobsheet->refresh()
         ], 200);
     }
-
 
     /**
      * Logout function for all user types - receives user_type from frontend
