@@ -601,12 +601,13 @@ class AuthController extends Controller
                         
                         // Get driver info
                         if ($jobsheet->driver_id) {
-                            $driver = Driver::select('phone', 'name')
+                            $driver = Driver::select('phone', 'name', 'wp_number')
                                         ->where('driver_id', $jobsheet->driver_id)
                                         ->first();
                             if ($driver) {
                                 $order->driver_name = $driver->name;
                                 $order->driver_phone = $driver->phone;
+                                $order->wp_number = $driver->wp_number;
                             }
                         }
                     }else{
@@ -618,11 +619,12 @@ class AuthController extends Controller
                         
                         // Get driver phone and name if driver_id exists
                         if ($vehicles && $vehicles->driver_id) {
-                            $driver = Driver::select('phone', 'name')
+                            $driver = Driver::select('phone', 'name', 'wp_number')
                                         ->where('driver_id', $vehicles->driver_id)
                                         ->first();
                             $order->driver_phone = $driver->phone ?? null;
                             $order->driver_name = $driver->name ?? null;
+                            $order->wp_number = $driver->wp_number ?? null;
                         }
                     }
                 }
@@ -643,24 +645,26 @@ class AuthController extends Controller
                     
                     if ($jobsheet && $jobsheet->guide_id) {
                         // Get guide info using guide_id from jobsheet
-                        $guide = Guide::select('city', 'contact_no', 'name')
+                        $guide = Guide::select('city', 'contact_no', 'name', 'wp_number')
                                     ->where('guide_id', $jobsheet->guide_id)
                                     ->first();
                         if ($guide) {
                             $order->city = $guide->city;
                             $order->guide_contact_no = $guide->contact_no;
                             $order->guide_name = $guide->name;
+                            $order->wp_number = $guide->wp_number ?? null;
                         }
                     }
                     else if(isset($orderData[0]['guide_id'])){
                         $guideId = $orderData[0]['guide_id'];
-                        $guide = Guide::select('city', 'contact_no', 'name')
+                        $guide = Guide::select('city', 'contact_no', 'name', 'wp_number')
                                     ->where('guide_id', $guideId)
                                     ->first();
                         if ($guide) {
                             $order->city = $guide->city;
                             $order->guide_contact_no = $guide->contact_no;
                             $order->guide_name = $guide->name;
+                            $order->wp_number = $guide->wp_number ?? null;
                         }
                     }
                 }
