@@ -60,6 +60,16 @@ return [
             'report' => false,
         ],
 
+        'azure' => [
+            'driver' => 'azure',
+            'name' => env('AZURE_STORAGE_ACCOUNT_NAME'),
+            'key' => env('AZURE_STORAGE_ACCOUNT_KEY'),
+            'endpoint' => env('AZURE_STORAGE_ENDPOINT', 'https://{account}.blob.core.windows.net'),
+            'container' => env('AZURE_STORAGE_CONTAINER', 'uploads'),
+            'throw' => false,
+            'report' => false,
+        ],
+
     ],
 
     /*
