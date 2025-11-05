@@ -19,6 +19,10 @@ use App\Models\AppManagement;
 use Illuminate\Support\Facades\DB;
 use App\Models\CityExploration;
 use App\Models\Country;
+use App\Models\Agent;
+use App\Models\Agency;
+use App\Models\GuideLanguage;
+use App\Models\User;
 
 class AuthController extends Controller
 {
@@ -97,6 +101,13 @@ class AuthController extends Controller
                     'message' => 'Driver not found or invalid credentials',
                 ], 404);
             }
+            $dmc_id = $driver->dmc_id;
+            if($dmc_id){
+                $dmc = User::select('name', 'phone', 'email')->where('userId', $dmc_id)->first();
+            }
+            else{
+                $dmc = null;
+            }
 
             // Generate Sanctum token
             $token = $driver->createToken('driver-token')->plainTextToken;
@@ -107,7 +118,8 @@ class AuthController extends Controller
                 'data' => [
                     'driver' => $driver,
                     'token' => $token,
-                    'role' => 'driver'
+                    'role' => 'driver',
+                    'dmc_info' => $dmc ?? null
                 ]
             ], 200);
 
@@ -145,7 +157,7 @@ class AuthController extends Controller
                 'license_image', 'license_exp_date', 'certified', 'experience_years', 
                 'service_type', 'approval', 'close_days', 'close_dates', 'salutation', 
                 'city', 'country', 'created_by', 'status', 'dmc_id', 'guide_gender', 'guide_age',
-                'app_password'
+                'app_password', 'wp_number', 'dmc_id'
             ])
                 ->where('email', $email)
                 ->first();
@@ -156,7 +168,13 @@ class AuthController extends Controller
                     'message' => 'Guide not found or invalid credentials',
                 ], 404);
             }
-
+            $dmc_id = $guide->dmc_id;
+            if($dmc_id){
+                $dmc = User::select('name', 'phone', 'email')->where('userId', $dmc_id)->first();
+            }
+            else{
+                $dmc = null;
+            }
             // Debug: Check if guide_id exists
             \Log::info('Guide ID: ' . ($guide->guide_id ?? 'NULL'));
             \Log::info('Guide getKey(): ' . $guide->getKey());
@@ -174,7 +192,8 @@ class AuthController extends Controller
                 'data' => [
                     'guide' => $guide,
                     'token' => $token,
-                    'role' => 'guide'
+                    'role' => 'guide',
+                    'dmc_info' => $dmc ?? null
                 ]
             ], 200);
 
@@ -204,9 +223,13 @@ class AuthController extends Controller
             }
 
             // Fetch jobsheets for this driver with vehicle information
+            // Only include jobsheets where tour_status is Confirmed, Definite, or Actual
             $jobsheets = Jobsheet::select('jobsheet_id', 'driver_id', 'tour_id', 'order_id', 'vehicle_id', 'current_status','date', 'data', 'type', 'service_type', 'journey_time','driver_id')->whereNotNull('driver_id')
                 ->where('date', '=', today())
                 ->where('driver_id', $driver_id)
+                ->whereHas('tour', function($query) {
+                    $query->whereIn('tour_status', ['Confirmed', 'Definite', 'Actual']);
+                })
                 ->get();
             $tourIds = $jobsheets
                 ->pluck('tour_id')   // get all tour IDs
@@ -277,7 +300,9 @@ class AuthController extends Controller
 
             $tourIds = $jobsheets->pluck('tour_id')->unique()->values();
             $customer_info = [];
+            $dmc_id = null;
             foreach($tourIds as $tourId){
+                
                 $firstOrder = Order::select('data')->where('tour_id', $tourId)->first();
                 $orderData = is_string($firstOrder->data) ? json_decode($firstOrder->data, true) : $firstOrder->data;
                 if($orderData && isset($orderData[0])){
@@ -299,20 +324,23 @@ class AuthController extends Controller
                         'state' => $orderData[0]['state'] ?? '',
                         'zip' => $orderData[0]['zip'] ?? ''
                     ];
+                    $dmc_id = $orderData[0]['dmc_id'];
                 }
                 else{
                     $customer_info[$tourId] = null;
                 }
             }
+            
             return response()->json([
                 'success' => true,
-                'message' => 'Driver jobsheets retrieved successfully',
-                'data' => [
-                    'jobsheets' => $jobsheetsWithVehicles,
-                    'customer_info' => $customer_info,
-                    'total_jobsheets' => $jobsheetsWithVehicles->count()
-                ]
-            ], 200);
+            'message' => 'Driver jobsheets retrieved successfully',
+            'data' => [
+                'jobsheets' => $jobsheetsWithVehicles,
+                'customer_info' => $customer_info,
+                'total_jobsheets' => $jobsheetsWithVehicles->count(),
+                
+            ]
+        ], 200);
 
         } catch (\Exception $e) {
             return response()->json([
@@ -339,8 +367,12 @@ class AuthController extends Controller
             }
 
             // Fetch jobsheets for this guide with vehicle information
+            // Only include jobsheets where tour_status is Confirmed, Definite, or Actual
             $jobsheets = Jobsheet::select('jobsheet_id', 'tour_id', 'order_id', 'current_status','date', 'data', 'type', 'service_type', 'journey_time', 'guide_id')->whereNotNull('guide_id')
                 ->where('guide_id', $guide_id)->where('date', '=', today())
+                ->whereHas('tour', function($query) {
+                    $query->whereIn('tour_status', ['Confirmed', 'Definite', 'Actual']);
+                })
                 ->get();
             
 
@@ -527,12 +559,15 @@ class AuthController extends Controller
         $guest = $request->guest; // from middleware
         $status_type = $request->status_type;
         $now = now();
+
         
         // Decode tour_id JSON array
         $tourIds = is_array($guest->tour_id) ? $guest->tour_id : json_decode($guest->tour_id, true);
         
         // Get tours based on status_type using check_in_time and check_out_time
-        $toursQuery = Tour::whereIn('tour_id', $tourIds);
+        // Only include tours where tour_status is Confirmed, Definite, or Actual
+        $toursQuery = Tour::whereIn('tour_id', $tourIds)
+                        ->whereIn('tour_status', ['Definite', 'Actual']);
         
         if($status_type == 'past'){
             $toursQuery->where('check_out_time', '<', $now);
@@ -542,12 +577,26 @@ class AuthController extends Controller
         } else if($status_type == 'upcoming'){
             $toursQuery->where('check_in_time', '>', $now);
         }
+        else{
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid status type',
+            ], 400);
+        }
         
         $tours = $toursQuery->get();
         
         // Map over tours and get all orders for each tour
         $toursWithOrders = $tours->map(function ($tour) {
             // Get all orders for this tour (without the tour relationship to avoid duplication)
+            $agentId = $tour->agent_id;
+            $agent = Agent::select('agency_id')
+                ->where('agent_id', $agentId)
+                ->first();
+            $agency = Agency::select('agency_name', 'phone', 'email')
+                ->where('agency_id', $agent->agency_id)
+                ->first();
+            
             $orders = Order::select([
                 'agent_id', 'tour_id', 'data', 'type', 'status', 
                 'booking_id', 'reference_id', 'invoice_pdf', 'bookingType', 
@@ -587,18 +636,27 @@ class AuthController extends Controller
                 elseif(($order->type == 'travel_point' || $order->type == 'entry_port' || $order->type == 'exit_port' || $order->type == 'travel_hourly' || $order->type == 'local_transport') && !empty($orderData)){
                     // Get vehicle_id and driver_id from jobsheet table for this specific order
                     $jobsheet = DB::table('jobsheets')
-                                ->select('vehicle_id', 'driver_id')
+                                ->select('vehicle_id', 'driver_id','comments')
                                 ->where('order_id', $order->booking_id)
                                 ->where('type', $order->type)
                                 ->first();
                     
                     if ($jobsheet) {
+                        $order->message = $jobsheet->comments ?? null;
                         // Get vehicle city
                         if ($jobsheet->vehicle_id) {
-                            $vehicle = Vehicle::select('city')
+                            $vehicle = Vehicle::select('city', 'vehicle_name', 'vehicle_type', 'vehicle_model', 'image', 'seating_capacity', 'vehicle_plate_no', 'sharable', 'vehicle_color')
                                         ->where('vehicle_id', $jobsheet->vehicle_id)
                                         ->first();
                             $order->city = $vehicle->city ?? null;
+                            $order->vehicle_name = $vehicle->vehicle_name ?? null;
+                            $order->vehicle_type = $vehicle->vehicle_type ?? null;
+                            $order->vehicle_model = $vehicle->vehicle_model ?? null;
+                            $order->vehicle_image = $vehicle->image ?? null;
+                            $order->seating_capacity = $vehicle->seating_capacity ?? null;
+                            $order->vehicle_plate_no = $vehicle->vehicle_plate_no ?? null;
+                            $order->sharable = $vehicle->sharable ?? null;
+                            $order->vehicle_color = $vehicle->vehicle_color ?? null;
                         }
                         
                         // Get driver info
@@ -614,10 +672,21 @@ class AuthController extends Controller
                         }
                     }else{
                         $vehiclesId = $orderData[0]['vehicles_id'];
-                        $vehicles = Vehicle::select('city', 'driver_id')
+                        
+                        $vehicles = Vehicle::select('city', 'driver_id', 'vehicle_name', 'vehicle_type', 'vehicle_model', 'image', 'seating_capacity', 'vehicle_plate_no', 'sharable', 'vehicle_color')
                                     ->where('vehicle_id', $vehiclesId)
                                     ->first();
+                        
                         $order->city = $vehicles->city ?? null;
+                        $order->vehicle_name = $vehicles->vehicle_name ?? null;
+                        $order->vehicle_type = $vehicles->vehicle_type ?? null;
+                        $order->vehicle_model = $vehicles->vehicle_model ?? null;
+                        $order->vehicle_image = $vehicles->image ?? null;
+                        $order->seating_capacity = $vehicles->seating_capacity ?? null;
+                        $order->vehicle_plate_no = $vehicles->vehicle_plate_no ?? null;
+                        $order->sharable = $vehicles->sharable ?? null;
+                        $order->vehicle_color = $vehicles->vehicle_color ?? null;
+                        $order->message = null;
                         
                         // Get driver phone and name if driver_id exists
                         if ($vehicles && $vehicles->driver_id) {
@@ -641,21 +710,30 @@ class AuthController extends Controller
                 elseif($order->type == 'guide' && !empty($orderData)){
                     // Get guide_id from jobsheet table for this specific order
                     $jobsheet = DB::table('jobsheets')
-                                ->select('guide_id')
+                                ->select('guide_id', 'comments')
                                 ->where('order_id', $order->booking_id)
                                 ->where('type', 'guide')
                                 ->first();
                     
                     if ($jobsheet && $jobsheet->guide_id) {
                         // Get guide info using guide_id from jobsheet
-                        $guide = Guide::select('city', 'contact_no', 'name', 'wp_number')
+                        $guide = Guide::select('guide_id', 'city', 'contact_no', 'name', 'wp_number')
                                     ->where('guide_id', $jobsheet->guide_id)
                                     ->first();
+                        
                         if ($guide) {
+                            $guide_languages = GuideLanguage::select('language')
+                                ->where('guide_id', $guide->guide_id)
+                                ->get();
+                            $guide_languages = $guide_languages->map(function ($language) {
+                                return $language->language;
+                            });
+                            $order->languages = $guide_languages;
                             $order->city = $guide->city;
                             $order->guide_contact_no = $guide->contact_no;
                             $order->guide_name = $guide->name;
                             $order->wp_number = $guide->wp_number ?? null;
+                            $order->message = $jobsheet->comments ?? null;
                         }
                     }
                     else if(isset($orderData[0]['guide_id'])){
@@ -664,10 +742,18 @@ class AuthController extends Controller
                                     ->where('guide_id', $guideId)
                                     ->first();
                         if ($guide) {
+                            $guide_languages = GuideLanguage::select('language')
+                                ->where('guide_id', $guide->guide_id)
+                                ->get();
+                            $guide_languages = $guide_languages->map(function ($language) {
+                                return $language->language;
+                            });
+                            $order->languages = $guide_languages;
                             $order->city = $guide->city;
                             $order->guide_contact_no = $guide->contact_no;
                             $order->guide_name = $guide->name;
                             $order->wp_number = $guide->wp_number ?? null;
+                            $order->message = null;
                         }
                     }
                 }
@@ -710,6 +796,9 @@ class AuthController extends Controller
             $tourData = $tour->toArray();
             $tourData['orders'] = $orders;
             $tourData['total_orders'] = $orders->count();
+            $tourData['agency_name'] = $agency->agency_name;
+            $tourData['agency_phone'] = $agency->phone;
+            $tourData['agency_email'] = $agency->email;
             
             return $tourData;
         });
@@ -1107,10 +1196,24 @@ class AuthController extends Controller
                     ], 401);
                 }
     
+                // Determine the date to filter by
+                $filterDate = $request->date;
+                if (!empty($filterDate)) {
+                    // Convert to string if it's not already (handles string, date objects, etc.)
+                    $dateToFilter = is_string($filterDate) ? $filterDate : (string) $filterDate;
+                } else {
+                    // Default to tomorrow's date
+                    $dateToFilter = now()->addDay()->toDateString();
+                }
+    
                 // Fetch jobsheets for this driver with vehicle information
+                // Only include jobsheets where tour_status is Confirmed, Definite, or Actual
                 $jobsheets = Jobsheet::select('jobsheet_id', 'driver_id', 'tour_id', 'order_id', 'vehicle_id', 'current_status','date', 'data', 'type', 'service_type', 'journey_time','driver_id')->whereNotNull('driver_id')
-                    ->where('date', '=', now()->addDay()->toDateString())
+                    ->where('date', '=', $dateToFilter)
                     ->where('driver_id', $driver_id)
+                    ->whereHas('tour', function($query) {
+                        $query->whereIn('tour_status', ['Confirmed', 'Definite', 'Actual']);
+                    })
                     ->get();
                 $tourIds = $jobsheets
                     ->pluck('tour_id')   // get all tour IDs
@@ -1237,9 +1340,23 @@ class AuthController extends Controller
                     ], 401);
                 }
     
+                // Determine the date to filter by
+                $filterDate = $request->date;
+                if (!empty($filterDate)) {
+                    // Convert to string if it's not already (handles string, date objects, etc.)
+                    $dateToFilter = is_string($filterDate) ? $filterDate : (string) $filterDate;
+                } else {
+                    // Default to tomorrow's date
+                    $dateToFilter = now()->addDay()->toDateString();
+                }
+    
                 // Fetch jobsheets for this guide with vehicle information
+                // Only include jobsheets where tour_status is Confirmed, Definite, or Actual
                 $jobsheets = Jobsheet::select('jobsheet_id', 'tour_id', 'order_id', 'current_status','date', 'data', 'type', 'service_type', 'journey_time', 'guide_id')->whereNotNull('guide_id')
-                    ->where('guide_id', $guide_id)->where('date', '=', now()->addDay()->toDateString())
+                    ->where('guide_id', $guide_id)->where('date', '=', $dateToFilter)
+                    ->whereHas('tour', function($query) {
+                        $query->whereIn('tour_status', ['Confirmed', 'Definite', 'Actual']);
+                    })
                     ->get();
     
                 // Add vehicle information and order details to each jobsheet
