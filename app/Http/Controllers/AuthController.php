@@ -22,6 +22,7 @@ use App\Models\Country;
 use App\Models\Agent;
 use App\Models\Agency;
 use App\Models\GuideLanguage;
+use App\Models\User;
 
 class AuthController extends Controller
 {
