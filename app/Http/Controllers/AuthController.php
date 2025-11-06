@@ -911,10 +911,10 @@ class AuthController extends Controller
             $driver = null;
             $guide = null;
             if (!empty($jobsheet->driver_id)) {
-                $driver = Driver::select('driver_id', 'name')->where('driver_id', $jobsheet->driver_id)->first();
+                $driver = Driver::select('driver_id', 'name', 'image')->where('driver_id', $jobsheet->driver_id)->first();
             }
             if (!empty($jobsheet->guide_id)) {
-                $guide = Guide::select('guide_id', 'name')->where('guide_id', $jobsheet->guide_id)->first();
+                $guide = Guide::select('guide_id', 'name', 'image')->where('guide_id', $jobsheet->guide_id)->first();
             }
 
             $driverIdForMsg = $driver ? $driver->driver_id : 'N/A';
@@ -966,14 +966,25 @@ class AuthController extends Controller
                 $commentsDecoded = [];
             }
 
-            // Define icon based on status
-            $iconUrl = match($request->status) {
-                1 => 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png', // started - play icon
-                2 => 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png', // arrived - location icon
-                3 => 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png', // picked/completed - check icon
-                4 => 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png', // completed - check icon
-                default => 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png' // default notification icon
-            };
+            // Define icon based on status - use driver/guide image if available, otherwise use default
+            $defaultIconUrl = 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png';
+            $iconUrl = $defaultIconUrl;
+            
+            // Use driver or guide image as notification icon if available
+            if ($jobsheet->type === 'guide' && $guide && $guide->image) {
+                $iconUrl = $guide->image;
+            } elseif ($jobsheet->type === 'driver' && $driver && $driver->image) {
+                $iconUrl = $driver->image;
+            } else {
+                // Fallback to default icon based on status
+                $iconUrl = match($request->status) {
+                    1 => $defaultIconUrl, // started - play icon
+                    2 => $defaultIconUrl, // arrived - location icon
+                    3 => $defaultIconUrl, // picked/completed - check icon
+                    4 => $defaultIconUrl, // completed - check icon
+                    default => $defaultIconUrl // default notification icon
+                };
+            }
 
             // Build title and body including driver/guide details (conditional on jobsheet type)
             $title = 'Jobsheet Status Updated - ' . $statusText;
@@ -1002,8 +1013,10 @@ class AuthController extends Controller
             ];
             if ($jobsheet->type === 'guide') {
                 $dataPayload['guide_name'] = $guide ? $guide->name : null;
+                $dataPayload['guide_image'] = $guide && $guide->image ? $guide->image : null;
             } else {
                 $dataPayload['driver_name'] = $driver ? $driver->name : null;
+                $dataPayload['driver_image'] = $driver && $driver->image ? $driver->image : null;
                 $dataPayload['vehicle_name'] = $vehicleNameForMsg !== 'N/A' ? $vehicleNameForMsg : null;
                 $dataPayload['vehicle_number'] = $vehicleNumberForMsg;
                 $dataPayload['pickup_location'] = $pickupLocation;
