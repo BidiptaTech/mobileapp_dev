@@ -242,7 +242,8 @@ class AuthController extends Controller
                 
                 // Get order data if order_id exists
                 if ($jobsheet->order_id) {
-                    $order = Order::select('data')->where('booking_id', $jobsheet->order_id)->first();
+                    $order = Order::select('data', 'tour_id')->where('booking_id', $jobsheet->order_id)->first();
+                    $tour = Tour::select('tour_id', 'display_id', 'infant')->where('tour_id', $order->tour_id)->first();
                     
                     if ($order && $order->data) {
                         $orderData = is_string($order->data) ? json_decode($order->data, true) : $order->data;
@@ -264,6 +265,7 @@ class AuthController extends Controller
                                 'selectedHours' => $data['selectedHours'] ?? null,
                                 'adults' => $data['adults'] ?? null,
                                 'children' => $data['children'] ?? null,
+                                'infant' => $tour->infant ?? null,
                                 'distance' => $data['distance'] ?? null,
                                 'Night_Start_Time' => $data['Night_Start_Time'] ?? null,
                                 'Night_End_Time' => $data['Night_End_Time'] ?? null,
@@ -297,23 +299,21 @@ class AuthController extends Controller
                 
                 return $jobsheetData;
             });
-
+            
             $tourIds = $jobsheets->pluck('tour_id')->unique()->values();
             $customer_info = [];
             $dmc_id = null;
             foreach($tourIds as $tourId){
-                
                 $firstOrder = Order::select('data')->where('tour_id', $tourId)->first();
                 $orderData = is_string($firstOrder->data) ? json_decode($firstOrder->data, true) : $firstOrder->data;
+                
                 if($orderData && isset($orderData[0])){
                     $share_status = null; // default
 
                     if (!empty($orderData[0]['email'])) {
-                        $guest = Guest::where('tour_id', $tourId)
-                            ->where('email', $orderData[0]['email'])
+                        $guest = Guest::where('email', $orderData[0]['email'])
                             ->first();
-
-                        $share_status = $guest?->share_status; // null-safe access
+                        $share_status = $guest?->share_contact; // null-safe access
                     }
                     $customer_info[$tourId] = [
                         'name' => $orderData[0]['fullName'] ?? '',
@@ -382,9 +382,10 @@ class AuthController extends Controller
                 
                 // Get order data if order_id exists
                 if ($jobsheet->order_id) {
-                    $order = Order::select('data')
+                    $order = Order::select('data', 'tour_id')
                         ->where('booking_id', $jobsheet->order_id)
                         ->first();
+                    $tour = Tour::select('tour_id', 'display_id', 'infant')->where('tour_id', $order->tour_id)->first();
                     
                     if ($order && $order->data) {
                         $orderData = is_string($order->data) ? json_decode($order->data, true) : $order->data;
@@ -400,6 +401,7 @@ class AuthController extends Controller
                                 'entrytime' => $data['entrytime'] ?? null,
                                 'adults' => $data['adults'] ?? null,
                                 'children' => $data['children'] ?? null,
+                                'infant' => $tour->infant ?? null,
                                 'hours' => $data['hours'] ?? null,
                                 
                             ];
@@ -425,11 +427,11 @@ class AuthController extends Controller
                     $share_status = null; // default
 
                     if (!empty($orderData[0]['email'])) {
-                        $guest = Guest::where('tour_id', $tourId)
+                        $guest = Guest::whereJsonContains('tour_id', $tourId)
                             ->where('email', $orderData[0]['email'])
                             ->first();
 
-                        $share_status = $guest?->share_status; // null-safe access
+                        $share_status = $guest?->share_contact; // null-safe access
                     }
                     $customer_info[$tourId] = [
                         'name' => $orderData[0]['fullName'],
@@ -593,7 +595,7 @@ class AuthController extends Controller
             $agent = Agent::select('agency_id')
                 ->where('agent_id', $agentId)
                 ->first();
-            $agency = Agency::select('agency_name', 'phone', 'email')
+            $agency = Agency::select('agency_name', 'phone', 'email', 'wp_number')
                 ->where('agency_id', $agent->agency_id)
                 ->first();
             
@@ -799,7 +801,7 @@ class AuthController extends Controller
             $tourData['agency_name'] = $agency->agency_name;
             $tourData['agency_phone'] = $agency->phone;
             $tourData['agency_email'] = $agency->email;
-            
+            $tourData['agency_wp_number'] = $agency->wp_number;
             return $tourData;
         });
         
@@ -868,7 +870,7 @@ class AuthController extends Controller
         }
 
         $tour_id = $jobsheet->tour_id;
-        $guestEmails = Guest::where('tour_id', $tour_id)->pluck('email')->toArray();
+        $guestEmails = Guest::whereJsonContains('tour_id', $tour_id)->pluck('email')->toArray();
 
         // Define status mapping based on jobsheet type
         $driverStatusMap = [
@@ -1142,12 +1144,14 @@ class AuthController extends Controller
         $guest_id = $request->guest_id;
         $share_status = $request->share_status;
         $guest = Guest::where('guest_id', $guest_id)->where('email', $email)->first();
+
         if(!$guest){
             return response()->json([
                 'success' => false,
                 'message' => 'Guest not found',
             ], 404);
         }
+        
         if ($share_status === null) {
             return response()->json([
                 'success' => false,
@@ -1226,7 +1230,8 @@ class AuthController extends Controller
                     
                     // Get order data if order_id exists
                     if ($jobsheet->order_id) {
-                        $order = Order::select('data')->where('booking_id', $jobsheet->order_id)->first();
+                        $order = Order::select('data', 'tour_id')->where('booking_id', $jobsheet->order_id)->first();
+                        $tour = Tour::select('tour_id', 'display_id', 'infant')->where('tour_id', $order->tour_id)->first();
                         
                         if ($order && $order->data) {
                             $orderData = is_string($order->data) ? json_decode($order->data, true) : $order->data;
@@ -1248,6 +1253,7 @@ class AuthController extends Controller
                                     'selectedHours' => $data['selectedHours'] ?? null,
                                     'adults' => $data['adults'] ?? null,
                                     'children' => $data['children'] ?? null,
+                                    'infant' => $tour->infant ?? null,
                                     'distance' => $data['distance'] ?? null,
                                     'Night_Start_Time' => $data['Night_Start_Time'] ?? null,
                                     'Night_End_Time' => $data['Night_End_Time'] ?? null,
@@ -1289,13 +1295,11 @@ class AuthController extends Controller
                     $orderData = is_string($firstOrder->data) ? json_decode($firstOrder->data, true) : $firstOrder->data;
                     if($orderData && isset($orderData[0])){
                         $share_status = null; // default
-    
                         if (!empty($orderData[0]['email'])) {
-                            $guest = Guest::where('tour_id', $tourId)
+                            $guest = Guest::whereJsonContains('tour_id', $tourId)
                                 ->where('email', $orderData[0]['email'])
                                 ->first();
-    
-                            $share_status = $guest?->share_status; // null-safe access
+                            $share_status = $guest?->share_contact; // null-safe access
                         }
                         $customer_info[$tourId] = [
                             'name' => $orderData[0]['fullName'] ?? '',
@@ -1365,9 +1369,10 @@ class AuthController extends Controller
                     
                     // Get order data if order_id exists
                     if ($jobsheet->order_id) {
-                        $order = Order::select('data')
+                        $order = Order::select('data', 'tour_id')
                             ->where('booking_id', $jobsheet->order_id)
                             ->first();
+                        $tour = Tour::select('tour_id', 'display_id', 'infant')->where('tour_id', $order->tour_id)->first();
                         
                         if ($order && $order->data) {
                             $orderData = is_string($order->data) ? json_decode($order->data, true) : $order->data;
@@ -1383,8 +1388,9 @@ class AuthController extends Controller
                                     'entrytime' => $data['entrytime'] ?? null,
                                     'adults' => $data['adults'] ?? null,
                                     'children' => $data['children'] ?? null,
+                                    'infant' => $tour->infant ?? null,
                                     'hours' => $data['hours'] ?? null,
-                                    
+
                                 ];
                             } else {
                                 $jobsheetData['order_details'] = null;
@@ -1408,11 +1414,11 @@ class AuthController extends Controller
                         $share_status = null; // default
     
                         if (!empty($orderData[0]['email'])) {
-                            $guest = Guest::where('tour_id', $tourId)
+                            $guest = Guest::whereJsonContains('tour_id', $tourId)
                                 ->where('email', $orderData[0]['email'])
                                 ->first();
     
-                            $share_status = $guest?->share_status; // null-safe access
+                            $share_status = $guest?->share_contact; // null-safe access
                         }
                         $customer_info[$tourId] = [
                             'name' => $orderData[0]['fullName'],
