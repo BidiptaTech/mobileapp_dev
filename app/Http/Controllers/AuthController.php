@@ -314,6 +314,7 @@ class AuthController extends Controller
                         $guest = Guest::where('email', $orderData[0]['email'])
                             ->first();
                         $share_status = $guest?->share_contact; // null-safe access
+                        $guest_whatsapp_no = $guest?->whatsapp_no;
                     }
                     $customer_info[$tourId] = [
                         'name' => $orderData[0]['fullName'] ?? '',
@@ -322,7 +323,8 @@ class AuthController extends Controller
                         'phone' => $share_status == 1 ? $orderData[0]['phone'] : 'Not Shared',
                         'address' => $orderData[0]['address1'] ?? '',
                         'state' => $orderData[0]['state'] ?? '',
-                        'zip' => $orderData[0]['zip'] ?? ''
+                        'zip' => $orderData[0]['zip'] ?? '',
+                        'whatsapp_no' => $guest_whatsapp_no ?? ''
                     ];
                     $dmc_id = $orderData[0]['dmc_id'];
                 }
@@ -432,6 +434,7 @@ class AuthController extends Controller
                             ->first();
 
                         $share_status = $guest?->share_contact; // null-safe access
+                        $guest_whatsapp_no = $guest?->whatsapp_no;
                     }
                     $customer_info[$tourId] = [
                         'name' => $orderData[0]['fullName'],
@@ -440,7 +443,8 @@ class AuthController extends Controller
                         'phone' => $share_status == 1 ? $orderData[0]['phone'] : 'Not Shared',
                         'address' => $orderData[0]['address1'],
                         'state' => $orderData[0]['state'],
-                        'zip' => $orderData[0]['zip']
+                        'zip' => $orderData[0]['zip'],
+                        'whatsapp_no' => $guest_whatsapp_no ?? ''
                     ];
                 }
                 else{
@@ -1400,6 +1404,7 @@ class AuthController extends Controller
                                 ->where('email', $orderData[0]['email'])
                                 ->first();
                             $share_status = $guest?->share_contact; // null-safe access
+                            $guest_whatsapp_no = $guest?->whatsapp_no;
                         }
                         $customer_info[$tourId] = [
                             'name' => $orderData[0]['fullName'] ?? '',
@@ -1408,7 +1413,8 @@ class AuthController extends Controller
                             'phone' => $share_status == 1 ? $orderData[0]['phone'] : 'Not Shared',
                             'address' => $orderData[0]['address1'] ?? '',
                             'state' => $orderData[0]['state'] ?? '',
-                            'zip' => $orderData[0]['zip'] ?? ''
+                            'zip' => $orderData[0]['zip'] ?? '',
+                            'whatsapp_no' => $guest_whatsapp_no ?? ''
                         ];
                     }
                     else{
@@ -1519,6 +1525,7 @@ class AuthController extends Controller
                                 ->first();
     
                             $share_status = $guest?->share_contact; // null-safe access
+                            $guest_whatsapp_no = $guest?->whatsapp_no;
                         }
                         $customer_info[$tourId] = [
                             'name' => $orderData[0]['fullName'],
@@ -1527,7 +1534,8 @@ class AuthController extends Controller
                             'phone' => $share_status == 1 ? $orderData[0]['phone'] : 'Not Shared',
                             'address' => $orderData[0]['address1'],
                             'state' => $orderData[0]['state'],
-                            'zip' => $orderData[0]['zip']
+                            'zip' => $orderData[0]['zip'],
+                            'whatsapp_no' => $guest_whatsapp_no ?? ''
                         ];
                     }
                     else{
