@@ -12,4 +12,12 @@ class Jobsheet extends Model
     use SoftDeletes;
     protected $table = 'jobsheets'; 
     protected $guarded = [];
+    
+    /**
+     * Get the tour associated with the jobsheet.
+     */
+    public function tour()
+    {
+        return $this->belongsTo(Tour::class, 'tour_id', 'tour_id');
+    }
 }
