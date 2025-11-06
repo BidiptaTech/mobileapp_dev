@@ -29,7 +29,6 @@ class NotificationHelper
             
             $database = $firebase->createDatabase();
             $messaging = $firebase->createMessaging();
-            
             // Convert single email to array
             $emailArray = is_array($emails) ? $emails : [$emails];
             $results = [];
@@ -48,11 +47,47 @@ class NotificationHelper
                     continue;
                 }
 
-                // Collect tokens for this email
+                // Collect tokens for this email from all devices
                 $tokens = [];
-                foreach ($snapshot->getValue() as $deviceNodeKey => $device) {
-                    if (!empty($device['token'])) {
-                        $tokens[] = $device['token'];
+                $deviceData = $snapshot->getValue();
+                
+                // Log the raw data structure for debugging
+                \Log::info('Firebase snapshot data', [
+                    'email' => $email,
+                    'encoded_email' => $encodedEmail,
+                    'has_data' => !empty($deviceData),
+                    'data_type' => gettype($deviceData),
+                    'device_count' => is_array($deviceData) ? count($deviceData) : 0
+                ]);
+                
+                if (empty($deviceData)) {
+                    $results[] = [
+                        'email' => $email,
+                        'success' => false,
+                        'message' => 'No devices found in Firebase'
+                    ];
+                    continue;
+                }
+                
+                // Iterate through all devices
+                foreach ($deviceData as $deviceNodeKey => $device) {
+                    // Handle both array and object formats
+                    $deviceArray = is_array($device) ? $device : (array) $device;
+                    
+                    if (!empty($deviceArray['token'])) {
+                        $tokens[] = $deviceArray['token'];
+                        \Log::info('Found device token', [
+                            'email' => $email,
+                            'device_id' => $deviceArray['device_id'] ?? $deviceNodeKey,
+                            'platform' => $deviceArray['platform'] ?? 'unknown',
+                            'token_length' => strlen($deviceArray['token'])
+                        ]);
+                    } else {
+                        \Log::warning('Device missing token', [
+                            'email' => $email,
+                            'device_key' => $deviceNodeKey,
+                            'device_data' => $deviceArray
+                        ]);
                     }
                 }
 
@@ -60,53 +95,141 @@ class NotificationHelper
                     $results[] = [
                         'email' => $email,
                         'success' => false,
-                        'message' => 'No valid tokens found'
+                        'message' => 'No valid tokens found in devices'
                     ];
+                    \Log::warning('No tokens extracted', [
+                        'email' => $email,
+                        'device_count' => count($deviceData),
+                        'device_keys' => array_keys($deviceData)
+                    ]);
                     continue;
+                }
+                
+                \Log::info('Tokens collected successfully', [
+                    'email' => $email,
+                    'total_tokens' => count($tokens),
+                    'device_count' => count($deviceData)
+                ]);
+
+                // Convert all data values to strings (Firebase requirement)
+                $stringData = [];
+                if (!empty($data)) {
+                    foreach ($data as $key => $value) {
+                        if (is_array($value) || is_object($value)) {
+                            $stringData[$key] = json_encode($value);
+                        } elseif (is_bool($value)) {
+                            $stringData[$key] = $value ? '1' : '0';
+                        } elseif (is_null($value)) {
+                            $stringData[$key] = '';
+                        } else {
+                            $stringData[$key] = (string) $value;
+                        }
+                    }
                 }
 
                 // Build Notification & Message
                 $notification = Notification::create($title, $body, $image ?? null);
                 $message = CloudMessage::new()->withNotification($notification);
                 
-                // Attach data payload if provided
-                if (!empty($data)) {
-                    $message = $message->withData($data);
+                // Attach data payload if provided (all values must be strings)
+                if (!empty($stringData)) {
+                    $message = $message->withData($stringData);
                 }
                 
-                // Send multicast
-                $report = $messaging->sendMulticast($message, $tokens);
+                // Log for debugging
+                \Log::info('Preparing to send notification to multiple devices', [
+                    'email' => $email,
+                    'token_count' => count($tokens),
+                    'device_count' => count($deviceData),
+                    'data_keys' => array_keys($stringData),
+                    'tokens_preview' => array_map(function($token) {
+                        return substr($token, 0, 20) . '...';
+                    }, array_slice($tokens, 0, 3)) // Show first 3 tokens (truncated)
+                ]);
                 
-                // Process failures and remove invalid tokens
-                $failedIndices = [];
-                $failures = $report->failures();
+                // Send multicast (Firebase supports up to 500 tokens per call)
+                // Split into batches if more than 500 tokens
+                $batchSize = 500;
+                $totalSuccess = 0;
+                $totalFailure = 0;
+                $allFailedIndices = [];
                 
-                foreach ($failures as $index => $failure) {
-                    $error = $failure->error();
-                    $failedIndices[] = ['index' => $index, 'error' => $error ? $error->getMessage() : 'unknown'];
-                    
-                    // Remove token if NotRegistered or InvalidArgument
-                    $errorMsg = $error ? $error->getMessage() : '';
-                    if (stripos($errorMsg, 'NotRegistered') !== false || stripos($errorMsg, 'InvalidRegistration') !== false) {
-                        $tokenToRemove = $tokens[$index];
-                        $children = $ref->getSnapshot()->getValue();
-                        if ($children) {
-                            foreach ($children as $childKey => $childVal) {
-                                if (isset($childVal['token']) && $childVal['token'] === $tokenToRemove) {
-                                    $database->getReference("user_tokens/{$encodedEmail}/{$childKey}")->remove();
+                $tokenBatches = array_chunk($tokens, $batchSize);
+                
+                foreach ($tokenBatches as $batchIndex => $tokenBatch) {
+                    try {
+                        \Log::info('Sending batch', [
+                            'email' => $email,
+                            'batch_index' => $batchIndex + 1,
+                            'total_batches' => count($tokenBatches),
+                            'tokens_in_batch' => count($tokenBatch)
+                        ]);
+                        
+                        $report = $messaging->sendMulticast($message, $tokenBatch);
+                        $batchSuccess = $report->successes()->count();
+                        $batchFailure = $report->failures()->count();
+                        $totalSuccess += $batchSuccess;
+                        $totalFailure += $batchFailure;
+                        
+                        \Log::info('Batch sent', [
+                            'email' => $email,
+                            'batch_index' => $batchIndex + 1,
+                            'success_count' => $batchSuccess,
+                            'failure_count' => $batchFailure
+                        ]);
+                        
+                        // Process failures for this batch
+                        $failures = $report->failures();
+                        foreach ($failures as $index => $failure) {
+                            $error = $failure->error();
+                            $actualIndex = ($batchIndex * $batchSize) + $index;
+                            $allFailedIndices[] = [
+                                'index' => $actualIndex, 
+                                'error' => $error ? $error->getMessage() : 'unknown'
+                            ];
+                            
+                            // Remove token if NotRegistered or InvalidArgument
+                            $errorMsg = $error ? $error->getMessage() : '';
+                            if (stripos($errorMsg, 'NotRegistered') !== false || stripos($errorMsg, 'InvalidRegistration') !== false) {
+                                $tokenToRemove = $tokenBatch[$index];
+                                $children = $ref->getSnapshot()->getValue();
+                                if ($children) {
+                                    foreach ($children as $childKey => $childVal) {
+                                        if (isset($childVal['token']) && $childVal['token'] === $tokenToRemove) {
+                                            $database->getReference("user_tokens/{$encodedEmail}/{$childKey}")->remove();
+                                            \Log::info('Removed invalid token', ['email' => $email, 'device_key' => $childKey]);
+                                        }
+                                    }
                                 }
                             }
                         }
+                    } catch (\Exception $e) {
+                        \Log::error('Error sending batch', [
+                            'email' => $email,
+                            'batch_index' => $batchIndex,
+                            'error' => $e->getMessage()
+                        ]);
+                        $totalFailure += count($tokenBatch);
                     }
                 }
-
+                
+                \Log::info('All batches processed', [
+                    'email' => $email,
+                    'total_tokens' => count($tokens),
+                    'total_success' => $totalSuccess,
+                    'total_failure' => $totalFailure,
+                    'total_batches' => count($tokenBatches)
+                ]);
+                
                 $results[] = [
                     'email' => $email,
                     'success' => true,
                     'message' => 'Notification sent successfully',
-                    'successCount' => $report->successes()->count(),
-                    'failureCount' => $report->failures()->count(),
-                    'failed' => $failedIndices
+                    'successCount' => $totalSuccess,
+                    'failureCount' => $totalFailure,
+                    'totalTokens' => count($tokens),
+                    'totalDevices' => count($deviceData),
+                    'failed' => $allFailedIndices
                 ];
             }
             
