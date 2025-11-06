@@ -870,8 +870,15 @@ class AuthController extends Controller
         }
 
         $tour_id = $jobsheet->tour_id;
-        $guestEmails = Guest::whereJsonContains('tour_id', $tour_id)->pluck('email')->toArray();
-
+        
+        // Query guests where tour_id array contains the jobsheet's tour_id
+        // Handle both JSON array and direct value cases
+        $guestEmails = Guest::where(function($query) use ($tour_id) {
+            // If tour_id is stored as JSON array, check if it contains the value
+            $query->whereJsonContains('tour_id', $tour_id)
+                  // Also handle direct value match (in case some records have single value)
+                  ->orWhere('tour_id', $tour_id);
+        })->pluck('email')->unique()->toArray();
         // Define status mapping based on jobsheet type
         $driverStatusMap = [
             1 => 'started',
@@ -891,13 +898,13 @@ class AuthController extends Controller
 
         // Get the corresponding status text (fallback to numeric if not found)
         $statusText = $statusMap[$request->status] ?? $request->status;
-
+        
         // Update jobsheet fields
         $jobsheet->current_status = $request->status;
         $jobsheet->reach_time = $request->reach_time ?? '';
         $jobsheet->comments = $request->comments ? json_encode($request->comments) : json_encode([]);
         $jobsheet->save();
-
+        
         // Send notification to guests if any
         if (!empty($guestEmails)) {
             // Fetch driver and guide details for richer notification context
@@ -973,8 +980,9 @@ class AuthController extends Controller
             $bodyParts = [];
             $bodyParts[] = 'Status: ' . $statusText;
             if ($jobsheet->type === 'guide') {
-                // For guide jobsheets: send guide name
+                // For guide jobsheets: send guide name and requested comments (if any)
                 $bodyParts[] = 'Guide: ' . $guideNameForMsg;
+                if (!empty($commentsText)) { $bodyParts[] = 'Comments: ' . $commentsText; }
             } else {
                 // For driver jobsheets: show driver and vehicle details (and locations/comments when available)
                 $bodyParts[] = 'Driver: #' . $driverIdForMsg . ' ' . $driverNameForMsg;
