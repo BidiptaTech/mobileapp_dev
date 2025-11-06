@@ -925,6 +925,7 @@ class AuthController extends Controller
             // Vehicle details
             $vehicleNameForMsg = 'N/A';
             $vehicleNumberForMsg = null;
+            $vehicleColorForMsg = null;
             if (!empty($jobsheet->vehicle_id)) {
                 $vehicle = Vehicle::where('vehicle_id', $jobsheet->vehicle_id)->first();
                 if ($vehicle) {
@@ -934,7 +935,16 @@ class AuthController extends Controller
                         ?? $vehicle->registration_number
                         ?? $vehicle->plate_number
                         ?? null;
+                    $vehicleColorForMsg = $vehicle->vehicle_color ?? null;
                 }
+            }
+            
+            // Guide languages
+            $guideLanguages = [];
+            if (!empty($jobsheet->guide_id)) {
+                $guideLanguages = \App\Models\GuideLanguage::where('guide_id', $jobsheet->guide_id)
+                    ->pluck('language')
+                    ->toArray();
             }
 
             // Pickup/Drop details from order data
@@ -987,22 +997,88 @@ class AuthController extends Controller
             }
 
             // Build title and body including driver/guide details (conditional on jobsheet type)
-            $title = 'Jobsheet Status Updated - ' . $statusText;
-            $bodyParts = [];
-            $bodyParts[] = 'Status: ' . $statusText;
+            // Use shorter title
+            $title = 'Status: ' . ucfirst($statusText);
+            
+            // Build concise body that fits mobile notification limits (~200 chars)
             if ($jobsheet->type === 'guide') {
-                // For guide jobsheets: send guide name and requested comments (if any)
-                $bodyParts[] = 'Guide: ' . $guideNameForMsg;
-                if (!empty($commentsText)) { $bodyParts[] = 'Comments: ' . $commentsText; }
+                // For guide jobsheets: compact format
+                $bodyLines = [];
+                
+                // Line 1: Guide info
+                $bodyLines[] = 'Guide: ' . $guideNameForMsg;
+                
+                // Line 2: Languages
+                if (!empty($guideLanguages)) {
+                    $languagesText = implode(', ', $guideLanguages);
+                    $maxLangLength = 80;
+                    $shortLanguages = strlen($languagesText) > $maxLangLength 
+                        ? substr($languagesText, 0, $maxLangLength) . '...' 
+                        : $languagesText;
+                    $bodyLines[] = 'Languages: ' . $shortLanguages;
+                }
+                
+                // Line 3: Comments (truncate if too long)
+                if (!empty($commentsText)) {
+                    $maxCommentLength = 100;
+                    $shortComments = strlen($commentsText) > $maxCommentLength 
+                        ? substr($commentsText, 0, $maxCommentLength) . '...' 
+                        : $commentsText;
+                    $bodyLines[] = 'Note: ' . $shortComments;
+                }
+                
+                $body = implode("\n", $bodyLines);
             } else {
-                // For driver jobsheets: show driver and vehicle details (and locations/comments when available)
-                $bodyParts[] = 'Driver: #' . $driverIdForMsg . ' ' . $driverNameForMsg;
-                $bodyParts[] = 'Vehicle: ' . $vehicleNameForMsg . ($vehicleNumberForMsg ? ' (' . $vehicleNumberForMsg . ')' : '');
-                if ($pickupLocation) { $bodyParts[] = 'Pickup: ' . $pickupLocation; }
-                if ($dropLocation) { $bodyParts[] = 'Drop: ' . $dropLocation; }
-                if (!empty($commentsText)) { $bodyParts[] = 'Comments: ' . $commentsText; }
+                // For driver jobsheets: compact format with priority info first
+                $bodyLines = [];
+                
+                // Line 1: Driver info (most important)
+                $driverLine = 'Driver: ' . $driverNameForMsg;
+                if ($driverIdForMsg !== 'N/A') {
+                    $driverLine .= ' (#' . $driverIdForMsg . ')';
+                }
+                $bodyLines[] = $driverLine;
+                
+                // Line 2: Vehicle info (with color if available)
+                $vehicleLine = 'Vehicle: ' . $vehicleNameForMsg;
+                if ($vehicleNumberForMsg) {
+                    $vehicleLine .= ' - ' . $vehicleNumberForMsg;
+                }
+                if ($vehicleColorForMsg) {
+                    $vehicleLine .= ' (' . $vehicleColorForMsg . ')';
+                }
+                $bodyLines[] = $vehicleLine;
+                
+                // Line 3: Pickup (truncate if too long)
+                if ($pickupLocation) {
+                    $maxLocationLength = 60;
+                    $shortPickup = strlen($pickupLocation) > $maxLocationLength 
+                        ? substr($pickupLocation, 0, $maxLocationLength) . '...' 
+                        : $pickupLocation;
+                    $bodyLines[] = 'Pickup: ' . $shortPickup;
+                }
+                
+                // Line 4: Drop (truncate if too long)
+                if ($dropLocation) {
+                    $maxLocationLength = 60;
+                    $shortDrop = strlen($dropLocation) > $maxLocationLength 
+                        ? substr($dropLocation, 0, $maxLocationLength) . '...' 
+                        : $dropLocation;
+                    $bodyLines[] = 'Drop: ' . $shortDrop;
+                }
+                
+                // Line 5: Comments (truncate if too long)
+                if (!empty($commentsText)) {
+                    $maxCommentLength = 80;
+                    $shortComments = strlen($commentsText) > $maxCommentLength 
+                        ? substr($commentsText, 0, $maxCommentLength) . '...' 
+                        : $commentsText;
+                    $bodyLines[] = 'Note: ' . $shortComments;
+                }
+                
+                // Join with newlines for better readability
+                $body = implode("\n", $bodyLines);
             }
-            $body = implode(' | ', array_filter($bodyParts));
 
             // Build data payload conditionally
             $dataPayload = [
@@ -1014,11 +1090,14 @@ class AuthController extends Controller
             if ($jobsheet->type === 'guide') {
                 $dataPayload['guide_name'] = $guide ? $guide->name : null;
                 $dataPayload['guide_image'] = $guide && $guide->image ? $guide->image : null;
+                $dataPayload['guide_languages'] = !empty($guideLanguages) ? $guideLanguages : [];
+                $dataPayload['comments'] = $commentsDecoded;
             } else {
                 $dataPayload['driver_name'] = $driver ? $driver->name : null;
                 $dataPayload['driver_image'] = $driver && $driver->image ? $driver->image : null;
                 $dataPayload['vehicle_name'] = $vehicleNameForMsg !== 'N/A' ? $vehicleNameForMsg : null;
                 $dataPayload['vehicle_number'] = $vehicleNumberForMsg;
+                $dataPayload['vehicle_color'] = $vehicleColorForMsg;
                 $dataPayload['pickup_location'] = $pickupLocation;
                 $dataPayload['drop_location'] = $dropLocation;
                 $dataPayload['comments'] = $commentsDecoded;
