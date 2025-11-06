@@ -816,8 +816,9 @@ class AuthController extends Controller
             $bodyParts = [];
             $bodyParts[] = 'Status: ' . $statusText;
             if ($jobsheet->type === 'guide') {
-                // For guide jobsheets: send guide name
+                // For guide jobsheets: send guide name and requested comments (if any)
                 $bodyParts[] = 'Guide: ' . $guideNameForMsg;
+                if (!empty($commentsText)) { $bodyParts[] = 'Comments: ' . $commentsText; }
             } else {
                 // For driver jobsheets: show driver and vehicle details (and locations/comments when available)
                 $bodyParts[] = 'Driver: #' . $driverIdForMsg . ' ' . $driverNameForMsg;
