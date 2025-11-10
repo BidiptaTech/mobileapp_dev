@@ -16,7 +16,7 @@ class NotificationHelper
      * @param string|array $emails - Single email or array of emails
      * @param string $title - Notification title
      * @param string $body - Notification body
-     * @param string|null $image - Optional image URL
+     * @param string|null $image - Deprecated: Not used (kept for backward compatibility)
      * @param array $data - Optional data payload
      * @return array
      */
@@ -127,8 +127,8 @@ class NotificationHelper
                     }
                 }
 
-                // Build Notification & Message
-                $notification = Notification::create($title, $body, $image ?? null);
+                // Build Notification & Message (no image to avoid display issues)
+                $notification = Notification::create($title, $body, null);
                 $message = CloudMessage::new()->withNotification($notification);
                 
                 // Attach data payload if provided (all values must be strings)
