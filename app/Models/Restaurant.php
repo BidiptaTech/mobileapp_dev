@@ -1,17 +1,28 @@
 <?php
 
 namespace App\Models;
+
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use App\Models\User;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Laravel\Sanctum\HasApiTokens;
 
 class Restaurant extends Model
 {
+    use HasApiTokens;
     use HasFactory;
     use SoftDeletes;
-    protected $table = 'restaurants'; 
+    protected $table = 'restaurants';
     protected $guarded = [];
+
+    /**
+     * Get the name of the unique identifier for the model for Sanctum tokens.
+     */
+    public function getKeyName(): string
+    {
+        return 'restaurant_id';
+    }
 
     public function user()
     {
