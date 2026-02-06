@@ -569,7 +569,6 @@ class AuthController extends Controller
         $guest = $request->guest; // from middleware
         $status_type = $request->status_type;
         $now = now();
-
         
         // Decode tour_id JSON array
         $tourIds = is_array($guest->tour_id) ? $guest->tour_id : json_decode($guest->tour_id, true);
@@ -612,7 +611,7 @@ class AuthController extends Controller
                 'booking_id', 'reference_id', 'invoice_pdf', 'bookingType', 
                 'discount', 'markup_percentage', 'cancel_reason', 'approval_file', 
                 'is_approve', 'approval_id', 'actual_due_date', 'display_due_date', 
-                'voucher_image', 'upload_files'
+                'voucher_image', 'upload_files', 'qr_code', 'is_redeemed'
             ])
                 ->without('tour')
                 ->where('tour_id', $tour->tour_id)
@@ -1126,10 +1125,10 @@ class AuthController extends Controller
             $userType = $request->input('user_type');
             
             // Validate user type
-            if (!$userType || !in_array($userType, ['driver', 'guide', 'guest'])) {
+            if (!$userType || !in_array($userType, ['driver', 'guide', 'guest', 'restaurant'])) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Valid user_type is required (driver, guide, or guest)',
+                    'message' => 'Valid user_type is required (driver, guide, guest, or restaurant)',
                 ], 400);
             }
 
@@ -1230,6 +1229,8 @@ class AuthController extends Controller
                 return 'guide';
             case 'Guest':
                 return 'guest';
+            case 'Restaurant':
+                return 'restaurant';
             default:
                 return 'user';
         }

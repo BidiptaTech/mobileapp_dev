@@ -4,13 +4,14 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\NotificationController;
+use App\Http\Controllers\RestaurantController;
 
 Route::prefix('app/v1')->group(function () {
     Route::post('/login', [AuthController::class, 'login']);
+    Route::post('/restaurant-login', [RestaurantController::class, 'restaurantLogin']);
     Route::post('/send-notification', [NotificationController::class, 'send']);
 
     Route::middleware(['auth:sanctum'])->group(function () {
-        
         // Driver routes
         Route::middleware('is.driver')->group(function () {
             Route::post('/update-driver', [AuthController::class, 'updateDriver']);
@@ -27,6 +28,13 @@ Route::prefix('app/v1')->group(function () {
         Route::middleware('is.guest')->group(function () {
             Route::post('/update-guest', [AuthController::class, 'updateGuest']);
             Route::get('/guest-bookings', [AuthController::class, 'getGuestBookings']);
+        });
+
+        // Restaurant routes
+        Route::middleware('is.restaurant')->group(function () {
+            Route::post('/restaurant-logout', [RestaurantController::class, 'restaurantLogout']);
+            
+            Route::get('/restaurant-orders', [RestaurantController::class, 'getRestaurantOrders']);
         });
 
         // Common routes (accessible by all authenticated users)

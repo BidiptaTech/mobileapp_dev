@@ -16,6 +16,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'is.driver' => \App\Http\Middleware\EnsureUserIsDriver::class,
             'is.guide' => \App\Http\Middleware\EnsureUserIsGuide::class,
             'is.guest' => \App\Http\Middleware\EnsureUserIsGuest::class,
+            'is.restaurant' => \App\Http\Middleware\EnsureUserIsRestaurant::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
