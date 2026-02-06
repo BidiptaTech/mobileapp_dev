@@ -611,7 +611,7 @@ class AuthController extends Controller
                 'booking_id', 'reference_id', 'invoice_pdf', 'bookingType', 
                 'discount', 'markup_percentage', 'cancel_reason', 'approval_file', 
                 'is_approve', 'approval_id', 'actual_due_date', 'display_due_date', 
-                'voucher_image', 'upload_files'
+                'voucher_image', 'upload_files', 'qr_code', 'is_redeemed'
             ])
                 ->without('tour')
                 ->where('tour_id', $tour->tour_id)

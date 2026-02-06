@@ -33,6 +33,8 @@ Route::prefix('app/v1')->group(function () {
         // Restaurant routes
         Route::middleware('is.restaurant')->group(function () {
             Route::post('/restaurant-logout', [RestaurantController::class, 'restaurantLogout']);
+            
+            Route::get('/restaurant-orders', [RestaurantController::class, 'getRestaurantOrders']);
         });
 
         // Common routes (accessible by all authenticated users)
