@@ -33,7 +33,8 @@ Route::prefix('app/v1')->group(function () {
         // Restaurant routes
         Route::middleware('is.restaurant')->group(function () {
             Route::post('/restaurant-logout', [RestaurantController::class, 'restaurantLogout']);
-            
+            Route::post('/redeem-voucher-code', [RestaurantController::class, 'redeemVoucherCode']);
+            Route::post('/delete-restaurant-account', [RestaurantController::class, 'deleteRestaurantAccount']);
             Route::get('/restaurant-orders', [RestaurantController::class, 'getRestaurantOrders']);
         });
 
