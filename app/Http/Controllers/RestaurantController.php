@@ -263,7 +263,12 @@ class RestaurantController extends Controller
                 'message' => 'Restaurant not found',
             ], 404);
         }
-        if (!Hash::check($request->password, $restaurant->app_password)) {
+        // Support both password and app_password; trim to fix whitespace/truncation
+        $hashedPassword = $restaurant->password ?? '';
+
+        if (empty($hashedPassword) || 
+            !Hash::check($request->password, $hashedPassword)) {
+
             return response()->json([
                 'success' => false,
                 'message' => 'Incorrect password',
