@@ -11,7 +11,14 @@ use Carbon\Carbon;
 class Order extends Model
 {
     use HasFactory;
-    protected $table = 'orders'; 
+
+    /** Column name for voucher redemption status (is_reedem in database) */
+    public const REDEEMED_COLUMN = 'is_redeemed';
+
+    /** Column name for user who redeemed the voucher (reedem_by in database) */
+    public const REDEEMED_BY_COLUMN = 'reedem_by';
+
+    protected $table = 'orders';
     protected $guarded = [];
     protected $casts = [
         'data' => 'json', // Ensures Laravel treats 'data' column as JSON
