@@ -47,11 +47,16 @@ class RestaurantController extends Controller
             // Revoke existing tokens (optional: single device login) or create new token
             $restaurant->tokens()->where('name', 'restaurant-token')->delete();
             $token = $restaurant->createToken('restaurant-token')->plainTextToken;
+            $restaurant_data = array(
+                'restaurant_id' => $restaurant->restaurant_id,
+                'restaurant_name' => $restaurant->name,
+                'restaurant_email' => $restaurant->email,
+            );
 
             return response()->json([
                 'success' => true,
                 'message' => 'Restaurant logged in successfully',
-                'data' => $restaurant,
+                'data' => $restaurant_data,
                 'token' => $token,
                 'role' => 'restaurant',
             ], 200);
@@ -185,4 +190,96 @@ class RestaurantController extends Controller
         ], 200);
     }
 
-}
+    /**
+     * Redeem voucher code - marks the order as redeemed.
+     * Only the restaurant that owns the order can redeem it.
+     */
+    public function redeemVoucherCode(Request $request)
+    {
+        $request->validate([
+            'order_id' => 'required',
+            'restaurant_id' => 'required',
+        ]);
+
+        $restaurant = Restaurant::where('restaurant_id', $request->restaurant_id)->first();
+        if (!$restaurant) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Restaurant not found',
+            ], 404);
+        }
+
+        $order = Order::where('booking_id', $request->order_id)->where('type', 'restaurant')->first();
+
+        if (!$order) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Order not found',
+            ], 404);
+        }
+
+        // Verify the order belongs to this restaurant
+        $data = is_array($order->data) ? $order->data : json_decode($order->data, true);
+        $orderRestaurantId = $data[0]['restaurantId'] ?? null;
+        if ((int) $orderRestaurantId !== (int) $restaurant->restaurant_id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You are not authorized to redeem this order',
+            ], 403);
+        }
+
+        // Check if already redeemed
+        $redeemedColumn = Order::REDEEMED_COLUMN;
+        if (!empty($order->{$redeemedColumn})) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Voucher has already been redeemed',
+            ], 422);
+        }
+
+        $order->update([
+            $redeemedColumn => 1,
+            Order::REDEEMED_BY_COLUMN => $restaurant->restaurant_id,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Voucher redeemed successfully',
+        ], 200);
+    }
+
+    //DELETE rESTAURANTS ACCOUNT
+    public function deleteRestaurantAccount(Request $request)
+    {   
+        try{
+        $request->validate([
+            'password' => 'required',
+            'restaurant_id' => 'required',
+        ]);
+        $restaurant = Restaurant::where('restaurant_id', $request->restaurant_id)->first();
+        if (!$restaurant) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Restaurant not found',
+            ], 404);
+        }
+        if (!Hash::check($request->password, $restaurant->app_password)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Incorrect password',
+            ], 403);
+        }
+        // Soft delete (Restaurant model uses SoftDeletes - sets deleted_at)
+        $restaurant->delete();
+        return response()->json([
+            'success' => true,
+            'message' => 'Restaurant account deleted successfully',
+        ], 200);
+    }catch(\Exception $e){
+        return response()->json([
+            'success' => false,
+            'message' => 'Error deleting restaurant account',
+            'error' => $e->getMessage(),
+        ], 500);
+    }
+}}
