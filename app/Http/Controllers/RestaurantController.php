@@ -125,6 +125,15 @@ class RestaurantController extends Controller
      */
     public function getRestaurantOrders(Request $request)
     {
+        $filter = $request->header('Type');
+
+        if (!in_array($filter, ['past', 'upcoming', 'ongoing'], true)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'The Type header is required and must be one of: past, upcoming, ongoing',
+            ], 422);
+        }
+
         $restaurant = $request->user();
 
         if (!$restaurant || !($restaurant instanceof Restaurant)) {
@@ -155,10 +164,7 @@ class RestaurantController extends Controller
             ->get();
 
         $today = Carbon::today();
-
-        $past = collect();
-        $ongoing = collect();
-        $upcoming = collect();
+        $filtered = collect();
 
         foreach ($orders as $order) {
             $data = is_array($order->data) ? $order->data : json_decode($order->data, true);
@@ -170,23 +176,22 @@ class RestaurantController extends Controller
 
             $date = Carbon::parse($bookingDate)->startOfDay();
 
-            if ($date->lt($today)) {
-                $past->push($order);
-            } elseif ($date->isSameDay($today)) {
-                $ongoing->push($order);
-            } else {
-                $upcoming->push($order);
+            $match = match ($filter) {
+                'past' => $date->lt($today),
+                'ongoing' => $date->isSameDay($today),
+                'upcoming' => $date->gt($today),
+                default => false,
+            };
+
+            if ($match) {
+                $filtered->push($order);
             }
         }
 
         return response()->json([
             'success' => true,
             'message' => 'Restaurant orders fetched successfully',
-            'data' => [
-                'past' => $past->values(),
-                'ongoing' => $ongoing->values(),
-                'upcoming' => $upcoming->values(),
-            ],
+            'data' => $filtered->values(),
         ], 200);
     }
 
