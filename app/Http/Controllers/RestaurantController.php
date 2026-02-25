@@ -7,6 +7,7 @@ use App\Models\Restaurant;
 use App\Models\Order;
 use App\Models\City;
 use App\Models\Country;
+use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -47,10 +48,18 @@ class RestaurantController extends Controller
             // Revoke existing tokens (optional: single device login) or create new token
             $restaurant->tokens()->where('name', 'restaurant-token')->delete();
             $token = $restaurant->createToken('restaurant-token')->plainTextToken;
+            $dmcIds = is_array($restaurant->dmc_id)
+                ? $restaurant->dmc_id
+                : json_decode($restaurant->dmc_id, true);
+            $users = User::whereIn('userId', $dmcIds)
+                ->select('userId', 'name', 'email')
+                ->get();
+            $dmcDetails = $users->toArray();
             $restaurant_data = array(
                 'restaurant_id' => $restaurant->restaurant_id,
                 'restaurant_name' => $restaurant->name,
                 'restaurant_email' => $restaurant->email,
+                'dmcDetails' => $dmcDetails
             );
 
             return response()->json([
@@ -169,7 +178,8 @@ class RestaurantController extends Controller
         foreach ($orders as $order) {
             $data = is_array($order->data) ? $order->data : json_decode($order->data, true);
             $bookingDate = $data[0]['bookingDate'] ?? null;
-
+            $dmcId = $data[0]['dmc_id'] ?? null;
+            $dmc = User::select('name', 'userId', 'email')->where('userId', $dmcId)->first();
             if (!$bookingDate) {
                 continue;
             }
@@ -184,6 +194,7 @@ class RestaurantController extends Controller
             };
 
             if ($match) {
+                $order->dmc = $dmc;
                 $filtered->push($order);
             }
         }
