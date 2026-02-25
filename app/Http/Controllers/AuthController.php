@@ -243,13 +243,14 @@ class AuthController extends Controller
                 // Get order data if order_id exists
                 if ($jobsheet->order_id) {
                     $order = Order::select('data', 'tour_id')->where('booking_id', $jobsheet->order_id)->first();
+                    
                     $tour = Tour::select('tour_id', 'display_id', 'infant', 'male_count', 'female_count')->where('tour_id', $order->tour_id)->first();
                     
                     if ($order && $order->data) {
                         $orderData = is_string($order->data) ? json_decode($order->data, true) : $order->data;
                         
                         if (isset($orderData[0])) {
-                            $data = $orderData[0];
+                            $data = $orderData[0];   
                             
                             // Extract only the specified driver fields
                             $jobsheetData['order_details'] = [
@@ -307,6 +308,7 @@ class AuthController extends Controller
             $dmc_id = null;
             foreach($tourIds as $tourId){
                 $firstOrder = Order::select('data')->where('tour_id', $tourId)->first();
+                
                 $orderData = is_string($firstOrder->data) ? json_decode($firstOrder->data, true) : $firstOrder->data;
                 
                 if($orderData && isset($orderData[0])){
@@ -328,7 +330,8 @@ class AuthController extends Controller
                         'zip' => $orderData[0]['zip'] ?? '',
                         'whatsapp_no' => $guest_whatsapp_no ?? ''
                     ];
-                    $dmc_id = $orderData[0]['dmc_id'];
+                    
+                    $dmc_id = $orderData[0]['dmc_id'] ?? $orderData[0]['dmc_Id'] ?? $orderData[0]['priceModeId'] ?? $orderData[0]['dmcId'] ?? null;
                 }
                 else{
                     $customer_info[$tourId] = null;
