@@ -52,7 +52,7 @@ class RestaurantController extends Controller
                 ? $restaurant->dmc_id
                 : json_decode($restaurant->dmc_id, true);
             $users = User::whereIn('userId', $dmcIds)
-                ->select('userId', 'name', 'email')
+                ->select('userId', 'name', 'email', 'company_name as dmc')
                 ->get();
             $dmcDetails = $users->toArray();
             $restaurant_data = array(
@@ -179,13 +179,11 @@ class RestaurantController extends Controller
             $data = is_array($order->data) ? $order->data : json_decode($order->data, true);
             $bookingDate = $data[0]['bookingDate'] ?? null;
             $dmcId = $data[0]['dmc_id'] ?? null;
-            $dmc = User::select('name', 'userId', 'email')->where('userId', $dmcId)->first();
+            $dmc = User::select('userId', 'email', 'company_name as name')->where('userId', $dmcId)->first();
             if (!$bookingDate) {
                 continue;
             }
-
             $date = Carbon::parse($bookingDate)->startOfDay();
-
             $match = match ($filter) {
                 'past' => $date->lt($today),
                 'ongoing' => $date->isSameDay($today),
