@@ -23,6 +23,7 @@ use App\Models\Agent;
 use App\Models\Agency;
 use App\Models\GuideLanguage;
 use App\Models\User;
+use App\Helpers\CommonHelper;
 
 class AuthController extends Controller
 {
@@ -49,22 +50,22 @@ class AuthController extends Controller
                 return $this->driverLogin($request);
             }
             
-            $guide = Guide::where('email', $email)->first();
+            $guide = Guide::where('email', $email)->orderBy('id', 'desc')->first();
             
             if ($guide && Hash::check($password, $guide->app_password) && $userType == 'guide') {
                 return $this->guideLogin($request);
             }
             
-            $guest = Guest::where('email', $email)->first();
-            
+            $guest = Guest::where('email', $email)->orderBy('id', 'desc')->first();
+
             if ($guest && Hash::check($password, $guest->app_password) && $userType == 'guest') {
                 return $this->guestLogin($request);
             }
             
-            return response()->json([
+           return response()->json([
                 'success' => false,
                 'message' => 'No user found with this email and password',
-            ], 400);
+            ], 400); 
 
         } catch (\Exception $e) {
             return response()->json([
@@ -495,14 +496,15 @@ class AuthController extends Controller
                 ], 400);
             }
 
-            // Authenticate guest (exclude timestamps from query)
+            // Authenticate guest: email is not unique, so take the last row (highest id) for this email
             $guest = Guest::select([
                 'id', 'guest_id', 'tour_id', 'guest_name', 'email', 
                 'contact', 'country_code', 'app_password', 'image'
             ])
                 ->where('email', $email)
+                ->orderBy('id', 'desc')
                 ->first();
-
+               
             if (!$guest || !Hash::check($password, $guest->app_password)) {
                 return response()->json([
                     'success' => false,
@@ -510,9 +512,17 @@ class AuthController extends Controller
                 ], 404);
             }
 
-            // Decode tour_id JSON array
-            $tourIds = is_array($guest->tour_id) ? $guest->tour_id : json_decode($guest->tour_id, true);
-            
+            // Get all rows with this email and pluck/merge all tour_id (each stored as JSON array e.g. [3385, 3384])
+            $tourIds = Guest::where('email', $email)
+                ->pluck('tour_id')
+                ->flatMap(function ($tourId) {
+                    $decoded = is_array($tourId) ? $tourId : json_decode($tourId, true);
+                    return is_array($decoded) ? $decoded : [];
+                })
+                ->unique()
+                ->values()
+                ->all();
+
             // Get all tours for this guest's tour_id to calculate counts
             $tours = Tour::whereIn('tour_id', $tourIds)->get();
             
@@ -574,13 +584,18 @@ class AuthController extends Controller
         $now = now();
         
         // Decode tour_id JSON array
-        $tourIds = is_array($guest->tour_id) ? $guest->tour_id : json_decode($guest->tour_id, true);
+        $tourIds = Guest::where('email', $guest->email)->pluck('tour_id')->flatMap(function ($tourId) {
+            $decoded = is_array($tourId) ? $tourId : json_decode($tourId, true);
+            return is_array($decoded) ? $decoded : [];
+        })->unique()->values()->all();
+       
+        // $tourIds = is_array($guest->tour_id) ? $guest->tour_id : json_decode($guest->tour_id, true);
         
         // Get tours based on status_type using check_in_time and check_out_time
         // Only include tours where tour_status is Confirmed, Definite, or Actual
         $toursQuery = Tour::whereIn('tour_id', $tourIds)
-                        ->whereIn('tour_status', ['Definite', 'Actual']);
-        
+                        ->whereIn('tour_status', ['Definite', 'Actual','Complete']);
+
         if($status_type == 'past'){
             $toursQuery->where('check_out_time', '<', $now);
         } else if($status_type == 'ongoing'){
@@ -832,11 +847,40 @@ class AuthController extends Controller
         ], 200);
     }
 
-    function updateGuest(Request $request){
+    function updateGuest(Request $request)
+    {
         $guest = $request->guest; // from middleware
-        $password = $request->password;
-        $guest->app_password = Hash::make($password);
+        $allowed = [
+            'guest_name', 'email', 'contact', 'country_code', 'app_password',
+            'image', 'whatsapp_no', 'salutation', 'share_contact'
+        ];
+
+        foreach ($allowed as $field) {
+            if ($field === 'image') {
+                if ($request->hasFile('image')) {
+                    
+                    $pathData = CommonHelper::image_path('file_storage', $request->file('image'));
+                    
+                    if (!empty($pathData['master_value'])) {
+                        
+                        $guest->image = $pathData['master_value'];
+                    }
+                }
+                continue;
+            }
+            if (!$request->has($field)) {
+                continue;
+            }
+            $value = $request->input($field);
+            if ($field === 'app_password' && $value !== null && $value !== '') {
+                $guest->app_password = Hash::make($value);
+            } else {
+                $guest->setAttribute($field, $value);
+            }
+        }
+
         $guest->save();
+
         return response()->json([
             'success' => true,
             'message' => 'Guest updated successfully',
@@ -844,11 +888,25 @@ class AuthController extends Controller
         ], 200);
     }
 
-    function updateDriver(Request $request){
+    function updateDriver(Request $request)
+    {
         $driver = $request->driver; // from middleware
-        $password = $request->password;
-        $driver->app_password = Hash::make($password);
+
+        if ($request->filled('app_password')) {
+            $driver->app_password = Hash::make($request->input('app_password'));
+        } elseif ($request->filled('password')) {
+            $driver->app_password = Hash::make($request->input('password'));
+        }
+
+        if ($request->hasFile('image')) {
+            $pathData = CommonHelper::image_path('file_storage', $request->file('image'));
+            if (!empty($pathData['master_value'])) {
+                $driver->image = $pathData['master_value'];
+            }
+        }
+
         $driver->save();
+
         return response()->json([
             'success' => true,
             'message' => 'Driver updated successfully',
@@ -856,11 +914,25 @@ class AuthController extends Controller
         ], 200);
     }
 
-    function updateGuide(Request $request){
+    function updateGuide(Request $request)
+    {
         $guide = $request->guide; // from middleware
-        $password = $request->password;
-        $guide->app_password = Hash::make($password);
+
+        if ($request->filled('app_password')) {
+            $guide->app_password = Hash::make($request->input('app_password'));
+        } elseif ($request->filled('password')) {
+            $guide->app_password = Hash::make($request->input('password'));
+        }
+
+        if ($request->hasFile('image')) {
+            $pathData = CommonHelper::image_path('file_storage', $request->file('image'));
+            if (!empty($pathData['master_value'])) {
+                $guide->image = $pathData['master_value'];
+            }
+        }
+
         $guide->save();
+
         return response()->json([
             'success' => true,
             'message' => 'Guide updated successfully',
