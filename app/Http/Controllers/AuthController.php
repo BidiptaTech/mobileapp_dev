@@ -314,18 +314,27 @@ class AuthController extends Controller
                 
                 if($orderData && isset($orderData[0])){
                     $share_status = null; // default
-
+                    $guest = null;
                     if (!empty($orderData[0]['email'])) {
                         $guest = Guest::where('email', $orderData[0]['email'])
                             ->first();
+                        
                         $share_status = $guest?->share_contact; // null-safe access
                         $guest_whatsapp_no = $guest?->whatsapp_no;
                     }
+                    else{
+                        $guest = Guest::whereJsonContains('tour_id', $tourId)
+                            ->first();
+
+                        $share_status = $guest?->share_contact; // null-safe access
+                        $guest_whatsapp_no = $guest?->whatsapp_no;
+                    }
+                    
                     $customer_info[$tourId] = [
-                        'name' => $orderData[0]['fullName'] ?? '',
-                        'email' => $orderData[0]['email'] ?? '',
+                        'name' => $guest?->guest_name ?? $orderData[0]['fullName'] ?? '',
+                        'email' => $guest?->email ?? $orderData[0]['email'] ?? '',
                         'isContactShared' => $share_status,
-                        'phone' => $share_status == 1 ? $orderData[0]['phone'] : 'Not Shared',
+                        'phone' => $share_status == 1 ? $guest?->contact ?? $orderData[0]['phone'] : 'Not Shared',
                         'address' => $orderData[0]['address1'] ?? '',
                         'state' => $orderData[0]['state'] ?? '',
                         'zip' => $orderData[0]['zip'] ?? '',
@@ -982,9 +991,10 @@ class AuthController extends Controller
             3 => 'completed',
         ];
 
-        // Choose the right map based on type
-        $statusMap = ($jobsheet->type === 'driver') ? $driverStatusMap : $guideStatusMap;
-
+        // Choose the right map based on type (driver-style types use driverStatusMap, else guideStatusMap)
+        $driverTypes = ['driver', 'travel_hourly', 'entry_port', 'local_transport', 'travel_point', 'attraction', 'restaurant', 'exit_port'];
+        $statusMap = in_array($jobsheet->type, $driverTypes) ? $driverStatusMap : $guideStatusMap;
+        
         // Get the corresponding status text (fallback to numeric if not found)
         $statusText = $statusMap[$request->status] ?? $request->status;
         
