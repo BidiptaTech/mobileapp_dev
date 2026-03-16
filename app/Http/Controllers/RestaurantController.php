@@ -12,6 +12,8 @@ use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Laravel\Sanctum\Sanctum;
+use Illuminate\Support\Facades\Auth;
+use App\Helpers\CommonHelper;
 
 class RestaurantController extends Controller
 {
@@ -204,6 +206,56 @@ class RestaurantController extends Controller
         ], 200);
     }
 
+    public function updateRestaurantDetails(Request $request)
+    {
+        try{
+            $request->validate([
+                'restaurant_id' => 'required',
+                'new_password' => 'nullable',
+                'current_password' => 'nullable',
+                'profile_image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
+            ]);
+            $currentRestaurant = $request->user();
+            if (!$currentRestaurant || !($currentRestaurant instanceof Restaurant) || (int) $currentRestaurant->restaurant_id !== (int) $request->restaurant_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Restaurant not authenticated or not authorized to update details',
+                ], 401);
+            }
+            if ($request->has('profile_image')) {
+                $profileImage = $request->file('profile_image');
+                
+                if ($profileImage && $profileImage->isValid()) {
+                    $profileImage = CommonHelper::image_path('file_storage', $profileImage);
+                    
+                    if (!empty($profileImage['master_value'])) {
+                        $currentRestaurant->profile_image = $profileImage['master_value'];
+                    }
+                }
+            }
+            if ($request->has('new_password')) {
+                if (!Hash::check($request->current_password, $currentRestaurant->password)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Incorrect current password',
+                    ], 403);
+                }
+                $currentRestaurant->password = Hash::make($request->new_password);
+            }
+            $currentRestaurant->save();
+            return response()->json([
+                'success' => true,
+                'message' => 'Restaurant details updated successfully',
+                'data' => $currentRestaurant,
+            ], 200);
+        }catch(\Exception $e){
+            return response()->json([
+                'success' => false,
+                'message' => 'Error updating restaurant details',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
     /**
      * Redeem voucher code - marks the order as redeemed.
      * Only the restaurant that owns the order can redeem it.
@@ -300,5 +352,5 @@ class RestaurantController extends Controller
             'message' => 'Error deleting restaurant account',
             'error' => $e->getMessage(),
         ], 500);
-    }
+    } 
 }}
