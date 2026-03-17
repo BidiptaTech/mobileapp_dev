@@ -362,7 +362,7 @@ class AuthController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Error retrieving driver jobsheets',
+                'message' => 'Error retrieving driver jobsheets. ' . $e->getMessage(),
                 'error' => $e->getMessage()
             ], 500);
         }
@@ -482,7 +482,7 @@ class AuthController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Error retrieving guide jobsheets',
+                'message' => 'Error retrieving guide jobsheets. ' . $e->getMessage(),
                 'error' => $e->getMessage()
             ], 500);
         }
@@ -581,624 +581,718 @@ class AuthController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Error during guest authentication',
+                'message' => 'Error during guest authentication. ' . $e->getMessage(),
                 'error' => $e->getMessage()
             ], 500);
         }
     }
     
+    /**
+     * Get guest bookings
+     */
     public function getGuestBookings(Request $request){
-        $guest = $request->guest; // from middleware
-        $status_type = $request->status_type;
-        $now = now();
-        
-        // Decode tour_id JSON array
-        $tourIds = Guest::where('email', $guest->email)->pluck('tour_id')->flatMap(function ($tourId) {
+        try {
+            $guest = $request->guest; // from middleware
+            $status_type = $request->status_type;
+            $now = now();
+            
+            // Decode tour_id JSON array
+            $tourIds = Guest::where('email', $guest->email)->pluck('tour_id')->flatMap(function ($tourId) {
             $decoded = is_array($tourId) ? $tourId : json_decode($tourId, true);
             return is_array($decoded) ? $decoded : [];
-        })->unique()->values()->all();
-       
-        // $tourIds = is_array($guest->tour_id) ? $guest->tour_id : json_decode($guest->tour_id, true);
+            })->unique()->values()->all();
         
-        // Get tours based on status_type using check_in_time and check_out_time
-        // Only include tours where tour_status is Confirmed, Definite, or Actual
-        $toursQuery = Tour::whereIn('tour_id', $tourIds)
-                        ->whereIn('tour_status', ['Definite', 'Actual','Complete']);
-
-        if($status_type == 'past'){
-            $toursQuery->where('check_out_time', '<', $now);
-        } else if($status_type == 'ongoing'){
-            $toursQuery->where('check_in_time', '<=', $now)
-                      ->where('check_out_time', '>=', $now);
-        } else if($status_type == 'upcoming'){
-            $toursQuery->where('check_in_time', '>', $now);
-        }
-        else{
-            return response()->json([
-                'success' => false,
-                'message' => 'Invalid status type',
-            ], 400);
-        }
-        
-        $tours = $toursQuery->get();
-        
-        // Map over tours and get all orders for each tour
-        $toursWithOrders = $tours->map(function ($tour) {
-            // Get all orders for this tour (without the tour relationship to avoid duplication)
-            $agentId = $tour->agent_id;
-            $agent = Agent::select('agency_id')
-                ->where('agent_id', $agentId)
-                ->first();
-            $agency = Agency::select('agency_name', 'phone', 'email', 'wp_number')
-                ->where('agency_id', $agent->agency_id)
-                ->first();
+            // $tourIds = is_array($guest->tour_id) ? $guest->tour_id : json_decode($guest->tour_id, true);
             
-            $orders = Order::select([
-                'agent_id', 'tour_id', 'data', 'type', 'status', 
-                'booking_id', 'reference_id', 'invoice_pdf', 'bookingType', 
-                'discount', 'markup_percentage', 'cancel_reason', 'approval_file', 
-                'is_approve', 'approval_id', 'actual_due_date', 'display_due_date', 
-                'voucher_image', 'upload_files', 'qr_code', 'is_redeemed', 'reedem_by'
-            ])
-                ->without('tour')
-                ->where('tour_id', $tour->tour_id)
-                ->get();
-            // Map orders to include hotel info
-            $orders = $orders->map(function ($order) {
+            // Get tours based on status_type using check_in_time and check_out_time
+            // Only include tours where tour_status is Confirmed, Definite, or Actual
+            $toursQuery = Tour::whereIn('tour_id', $tourIds)
+                            ->whereIn('tour_status', ['Definite', 'Actual','Complete']);
 
-                // Make sure data is decoded as array
-                $orderData = is_array($order->data) ? $order->data : json_decode($order->data, true);
+            if($status_type == 'past'){
+                $toursQuery->where('check_out_time', '<', $now);
+            } else if($status_type == 'ongoing'){
+                $toursQuery->where('check_in_time', '<=', $now)
+                        ->where('check_out_time', '>=', $now);
+            } else if($status_type == 'upcoming'){
+                $toursQuery->where('check_in_time', '>', $now);
+            }
+            else{
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid status type',
+                ], 400);
+            }
+            
+            $tours = $toursQuery->get();
+            
+            // Map over tours and get all orders for each tour
+            $toursWithOrders = $tours->map(function ($tour) {
+                // Get all orders for this tour (without the tour relationship to avoid duplication)
+                $agentId = $tour->agent_id;
+                $agent = Agent::select('agency_id')
+                    ->where('agent_id', $agentId)
+                    ->first();
+                $agency = Agency::select('agency_name', 'phone', 'email', 'wp_number')
+                    ->where('agency_id', $agent->agency_id)
+                    ->first();
+                
+                $orders = Order::select([
+                    'agent_id', 'tour_id', 'data', 'type', 'status', 
+                    'booking_id', 'reference_id', 'invoice_pdf', 'bookingType', 
+                    'discount', 'markup_percentage', 'cancel_reason', 'approval_file', 
+                    'is_approve', 'approval_id', 'actual_due_date', 'display_due_date', 
+                    'voucher_image', 'upload_files', 'qr_code', 'is_redeemed', 'reedem_by'
+                ])
+                    ->without('tour')
+                    ->where('tour_id', $tour->tour_id)
+                    ->get();
+                // Map orders to include hotel info
+                $orders = $orders->map(function ($order) {
 
-                if ($order->type === 'hotel' && !empty($orderData) && isset($orderData[0]['hotelDetails']['hotel_id'])) {
-                    $hotelId = $orderData[0]['hotelDetails']['hotel_id'];
+                    // Make sure data is decoded as array
+                    $orderData = is_array($order->data) ? $order->data : json_decode($order->data, true);
 
-                    // Fetch hotel from Hotel table
-                    $hotel = Hotel::select('city', 'main_image')
-                                ->where('hotel_unique_id', $hotelId)
-                                ->first();
+                    if ($order->type === 'hotel' && !empty($orderData) && isset($orderData[0]['hotelDetails']['hotel_id'])) {
+                        $hotelId = $orderData[0]['hotelDetails']['hotel_id'];
 
-                    // Add hotel info to order
-                    $order->city = $hotel->city ?? null; // fetched from Hotel table
-                    $order->phone = $hotel->phone ?? null;
-                    $order->hotel_image = $hotel->main_image ?? null;
-                }
-                elseif($order->type == 'attraction' && !empty($orderData) && isset($orderData[0]['AttractionId'])){
-                    $attractionId = $orderData[0]['AttractionId'];
-                    $attraction = Attraction::select('location', 'master_image')
-                                ->where('attraction_id', $attractionId)
-                                ->first();
-                    $order->city = $attraction->location ?? null;
-                    $order->phone = $attraction->phone ?? null;
-                    $order->attraction_image = $attraction->master_image ?? null;
-                }
-                elseif(($order->type == 'travel_point' || $order->type == 'entry_port' || $order->type == 'exit_port' || $order->type == 'travel_hourly' || $order->type == 'local_transport') && !empty($orderData)){
-                    // Get vehicle_id and driver_id from jobsheet table for this specific order
-                    $jobsheet = DB::table('jobsheets')
-                                ->select('vehicle_id', 'driver_id','comments')
-                                ->where('order_id', $order->booking_id)
-                                ->where('type', $order->type)
-                                ->first();
-                    
-                    if ($jobsheet) {
-                        $order->message = $jobsheet->comments ?? null;
-                        // Get vehicle city
-                        if ($jobsheet->vehicle_id) {
-                            $vehicle = Vehicle::select('city', 'vehicle_name', 'vehicle_type', 'vehicle_model', 'image', 'seating_capacity', 'vehicle_plate_no', 'sharable', 'vehicle_color')
-                                        ->where('vehicle_id', $jobsheet->vehicle_id)
-                                        ->first();
-                            $order->city = $vehicle->city ?? null;
-                            $order->vehicle_name = $vehicle->vehicle_name ?? null;
-                            $order->vehicle_type = $vehicle->vehicle_type ?? null;
-                            $order->vehicle_model = $vehicle->vehicle_model ?? null;
-                            $order->vehicle_image = $vehicle->image ?? null;
-                            $order->seating_capacity = $vehicle->seating_capacity ?? null;
-                            $order->vehicle_plate_no = $vehicle->vehicle_plate_no ?? null;
-                            $order->sharable = $vehicle->sharable ?? null;
-                            $order->vehicle_color = $vehicle->vehicle_color ?? null;
-                        }
+                        // Fetch hotel from Hotel table
+                        $hotel = Hotel::select('city', 'main_image')
+                                    ->where('hotel_unique_id', $hotelId)
+                                    ->first();
+
+                        // Add hotel info to order
+                        $order->city = $hotel->city ?? null; // fetched from Hotel table
+                        $order->phone = $hotel->phone ?? null;
+                        $order->hotel_image = $hotel->main_image ?? null;
+                    }
+                    elseif($order->type == 'attraction' && !empty($orderData) && isset($orderData[0]['AttractionId'])){
+                        $attractionId = $orderData[0]['AttractionId'];
+                        $attraction = Attraction::select('location', 'master_image')
+                                    ->where('attraction_id', $attractionId)
+                                    ->first();
+                        $order->city = $attraction->location ?? null;
+                        $order->phone = $attraction->phone ?? null;
+                        $order->attraction_image = $attraction->master_image ?? null;
+                    }
+                    elseif(($order->type == 'travel_point' || $order->type == 'entry_port' || $order->type == 'exit_port' || $order->type == 'travel_hourly' || $order->type == 'local_transport') && !empty($orderData)){
+                        // Get vehicle_id and driver_id from jobsheet table for this specific order
+                        $jobsheet = DB::table('jobsheets')
+                                    ->select('vehicle_id', 'driver_id','comments')
+                                    ->where('order_id', $order->booking_id)
+                                    ->where('type', $order->type)
+                                    ->first();
                         
-                        // Get driver info
-                        if ($jobsheet->driver_id) {
-                            $driver = Driver::select('phone', 'name', 'wp_number', 'image')
-                                        ->where('driver_id', $jobsheet->driver_id)
+                        if ($jobsheet) {
+                            $order->message = $jobsheet->comments ?? null;
+                            // Get vehicle city
+                            if ($jobsheet->vehicle_id) {
+                                $vehicle = Vehicle::select('city', 'vehicle_name', 'vehicle_type', 'vehicle_model', 'image', 'seating_capacity', 'vehicle_plate_no', 'sharable', 'vehicle_color')
+                                            ->where('vehicle_id', $jobsheet->vehicle_id)
+                                            ->first();
+                                $order->city = $vehicle->city ?? null;
+                                $order->vehicle_name = $vehicle->vehicle_name ?? null;
+                                $order->vehicle_type = $vehicle->vehicle_type ?? null;
+                                $order->vehicle_model = $vehicle->vehicle_model ?? null;
+                                $order->vehicle_image = $vehicle->image ?? null;
+                                $order->seating_capacity = $vehicle->seating_capacity ?? null;
+                                $order->vehicle_plate_no = $vehicle->vehicle_plate_no ?? null;
+                                $order->sharable = $vehicle->sharable ?? null;
+                                $order->vehicle_color = $vehicle->vehicle_color ?? null;
+                            }
+                            
+                            // Get driver info
+                            if ($jobsheet->driver_id) {
+                                $driver = Driver::select('phone', 'name', 'wp_number', 'image')
+                                            ->where('driver_id', $jobsheet->driver_id)
+                                            ->first();
+                                if ($driver) {
+                                    $order->driver_name = $driver->name;
+                                    $order->driver_phone = $driver->phone;
+                                    $order->wp_number = $driver->wp_number;
+                                    $order->driver_image = $driver->image ?? null;
+                                }
+                            }
+                        }else{
+                            $vehiclesId = $orderData[0]['vehicles_id'];
+                            
+                            $vehicles = Vehicle::select('city', 'driver_id', 'vehicle_name', 'vehicle_type', 'vehicle_model', 'image', 'seating_capacity', 'vehicle_plate_no', 'sharable', 'vehicle_color')
+                                        ->where('vehicle_id', $vehiclesId)
                                         ->first();
-                            if ($driver) {
-                                $order->driver_name = $driver->name;
-                                $order->driver_phone = $driver->phone;
-                                $order->wp_number = $driver->wp_number;
+                            
+                            $order->city = $vehicles->city ?? null;
+                            $order->vehicle_name = $vehicles->vehicle_name ?? null;
+                            $order->vehicle_type = $vehicles->vehicle_type ?? null;
+                            $order->vehicle_model = $vehicles->vehicle_model ?? null;
+                            $order->vehicle_image = $vehicles->image ?? null;
+                            $order->seating_capacity = $vehicles->seating_capacity ?? null;
+                            $order->vehicle_plate_no = $vehicles->vehicle_plate_no ?? null;
+                            $order->sharable = $vehicles->sharable ?? null;
+                            $order->vehicle_color = $vehicles->vehicle_color ?? null;
+                            $order->message = null;
+                            
+                            // Get driver phone and name if driver_id exists
+                            if ($vehicles && $vehicles->driver_id) {
+                                $driver = Driver::select('phone', 'name', 'wp_number', 'image')
+                                            ->where('driver_id', $vehicles->driver_id)
+                                            ->first();
+                                $order->driver_phone = $driver->phone ?? null;
+                                $order->driver_name = $driver->name ?? null;
+                                $order->wp_number = $driver->wp_number ?? null;
                                 $order->driver_image = $driver->image ?? null;
                             }
                         }
-                    }else{
-                        $vehiclesId = $orderData[0]['vehicles_id'];
-                        
-                        $vehicles = Vehicle::select('city', 'driver_id', 'vehicle_name', 'vehicle_type', 'vehicle_model', 'image', 'seating_capacity', 'vehicle_plate_no', 'sharable', 'vehicle_color')
-                                    ->where('vehicle_id', $vehiclesId)
+                    }
+                    elseif($order->type == 'restaurant' && !empty($orderData) && isset($orderData[0]['restaurantId'])){
+                        $restaurantId = $orderData[0]['restaurantId'];
+                        $restaurant = Restaurant::select('city', 'master_image', 'phone')
+                                    ->where('restaurant_id', $restaurantId)
+                                    ->first();
+                        $order->city = $restaurant->city ?? null;
+                        $order->phone = $restaurant->phone ?? null;
+                        $order->restaurant_image = $restaurant->master_image ?? null;
+                    }
+                    elseif($order->type == 'guide' && !empty($orderData)){
+                        // Get guide_id from jobsheet table for this specific order
+                        $jobsheet = DB::table('jobsheets')
+                                    ->select('guide_id', 'comments')
+                                    ->where('order_id', $order->booking_id)
+                                    ->where('type', 'guide')
                                     ->first();
                         
-                        $order->city = $vehicles->city ?? null;
-                        $order->vehicle_name = $vehicles->vehicle_name ?? null;
-                        $order->vehicle_type = $vehicles->vehicle_type ?? null;
-                        $order->vehicle_model = $vehicles->vehicle_model ?? null;
-                        $order->vehicle_image = $vehicles->image ?? null;
-                        $order->seating_capacity = $vehicles->seating_capacity ?? null;
-                        $order->vehicle_plate_no = $vehicles->vehicle_plate_no ?? null;
-                        $order->sharable = $vehicles->sharable ?? null;
-                        $order->vehicle_color = $vehicles->vehicle_color ?? null;
-                        $order->message = null;
-                        
-                        // Get driver phone and name if driver_id exists
-                        if ($vehicles && $vehicles->driver_id) {
-                            $driver = Driver::select('phone', 'name', 'wp_number', 'image')
-                                        ->where('driver_id', $vehicles->driver_id)
+                        if ($jobsheet && $jobsheet->guide_id) {
+                            // Get guide info using guide_id from jobsheet
+                            $guide = Guide::select('guide_id', 'city', 'contact_no', 'name', 'wp_number', 'image')
+                                        ->where('guide_id', $jobsheet->guide_id)
                                         ->first();
-                            $order->driver_phone = $driver->phone ?? null;
-                            $order->driver_name = $driver->name ?? null;
-                            $order->wp_number = $driver->wp_number ?? null;
-                            $order->driver_image = $driver->image ?? null;
+                            
+                            if ($guide) {
+                                $guide_languages = GuideLanguage::select('language')
+                                    ->where('guide_id', $guide->guide_id)
+                                    ->get();
+                                $guide_languages = $guide_languages->map(function ($language) {
+                                    return $language->language;
+                                });
+                                $order->languages = $guide_languages;
+                                $order->city = $guide->city;
+                                $order->guide_contact_no = $guide->contact_no;
+                                $order->guide_name = $guide->name;
+                                $order->wp_number = $guide->wp_number ?? null;
+                                $order->message = $jobsheet->comments ?? null;
+                                $order->guide_image = $guide->image ?? null;
+                            }
                         }
-                    }
-                }
-                elseif($order->type == 'restaurant' && !empty($orderData) && isset($orderData[0]['restaurantId'])){
-                    $restaurantId = $orderData[0]['restaurantId'];
-                    $restaurant = Restaurant::select('city', 'master_image', 'phone')
-                                ->where('restaurant_id', $restaurantId)
-                                ->first();
-                    $order->city = $restaurant->city ?? null;
-                    $order->phone = $restaurant->phone ?? null;
-                    $order->restaurant_image = $restaurant->master_image ?? null;
-                }
-                elseif($order->type == 'guide' && !empty($orderData)){
-                    // Get guide_id from jobsheet table for this specific order
-                    $jobsheet = DB::table('jobsheets')
-                                ->select('guide_id', 'comments')
-                                ->where('order_id', $order->booking_id)
-                                ->where('type', 'guide')
-                                ->first();
-                    
-                    if ($jobsheet && $jobsheet->guide_id) {
-                        // Get guide info using guide_id from jobsheet
-                        $guide = Guide::select('guide_id', 'city', 'contact_no', 'name', 'wp_number', 'image')
-                                    ->where('guide_id', $jobsheet->guide_id)
-                                    ->first();
-                        
-                        if ($guide) {
-                            $guide_languages = GuideLanguage::select('language')
-                                ->where('guide_id', $guide->guide_id)
-                                ->get();
-                            $guide_languages = $guide_languages->map(function ($language) {
-                                return $language->language;
-                            });
-                            $order->languages = $guide_languages;
-                            $order->city = $guide->city;
-                            $order->guide_contact_no = $guide->contact_no;
-                            $order->guide_name = $guide->name;
-                            $order->wp_number = $guide->wp_number ?? null;
-                            $order->message = $jobsheet->comments ?? null;
-                            $order->guide_image = $guide->image ?? null;
-                        }
-                    }
-                    else if(isset($orderData[0]['guide_id'])){
-                        $guideId = $orderData[0]['guide_id'];
-                        $guide = Guide::select('city', 'contact_no', 'name', 'wp_number', 'image')
-                                    ->where('guide_id', $guideId)
-                                    ->first();
-                        if ($guide) {
-                            $guide_languages = GuideLanguage::select('language')
-                                ->where('guide_id', $guide->guide_id)
-                                ->get();
-                            $guide_languages = $guide_languages->map(function ($language) {
-                                return $language->language;
-                            });
-                            $order->languages = $guide_languages;
-                            $order->city = $guide->city;
-                            $order->guide_contact_no = $guide->contact_no;
-                            $order->guide_name = $guide->name;
-                            $order->wp_number = $guide->wp_number ?? null;
-                            $order->message = null;
-                            $order->guide_image = $guide->image ?? null;
-                        }
-                    }
-                }
-                elseif ($order->type == 'attraction_package' && isset($orderData[0]['package_attraction_id'])) {
-                    $packageAttractionId = $orderData[0]['package_attraction_id'];
-                
-                    // Fetch the packaged attraction record
-                    $packagedAttraction = DB::table('packaged_attractions')
-                        ->where('packaged_attraction_id', $packageAttractionId)
-                        ->first();
-                
-                    if ($packagedAttraction && !empty($packagedAttraction->attractions)) {
-                        // Decode JSON array of attraction IDs
-                        $attractionIds = json_decode($packagedAttraction->attractions, true);
-                
-                        if (is_array($attractionIds) && count($attractionIds) > 0) {
-                            // Fetch the first attraction to get its city (location)
-                            $firstAttraction = DB::table('attractions')
-                                ->select('location')
-                                ->where('attraction_id', $attractionIds[0])
-                                ->first();
-                
-                            if ($firstAttraction) {
-                                // Add the city to order data
-                                $order->city = $firstAttraction->location;
+                        else if(isset($orderData[0]['guide_id'])){
+                            $guideId = $orderData[0]['guide_id'];
+                            $guide = Guide::select('city', 'contact_no', 'name', 'wp_number', 'image')
+                                        ->where('guide_id', $guideId)
+                                        ->first();
+                            if ($guide) {
+                                $guide_languages = GuideLanguage::select('language')
+                                    ->where('guide_id', $guide->guide_id)
+                                    ->get();
+                                $guide_languages = $guide_languages->map(function ($language) {
+                                    return $language->language;
+                                });
+                                $order->languages = $guide_languages;
+                                $order->city = $guide->city;
+                                $order->guide_contact_no = $guide->contact_no;
+                                $order->guide_name = $guide->name;
+                                $order->wp_number = $guide->wp_number ?? null;
+                                $order->message = null;
+                                $order->guide_image = $guide->image ?? null;
                             }
                         }
                     }
-                }
+                    elseif ($order->type == 'attraction_package' && isset($orderData[0]['package_attraction_id'])) {
+                        $packageAttractionId = $orderData[0]['package_attraction_id'];
+                    
+                        // Fetch the packaged attraction record
+                        $packagedAttraction = DB::table('packaged_attractions')
+                            ->where('packaged_attraction_id', $packageAttractionId)
+                            ->first();
+                    
+                        if ($packagedAttraction && !empty($packagedAttraction->attractions)) {
+                            // Decode JSON array of attraction IDs
+                            $attractionIds = json_decode($packagedAttraction->attractions, true);
+                    
+                            if (is_array($attractionIds) && count($attractionIds) > 0) {
+                                // Fetch the first attraction to get its city (location)
+                                $firstAttraction = DB::table('attractions')
+                                    ->select('location')
+                                    ->where('attraction_id', $attractionIds[0])
+                                    ->first();
+                    
+                                if ($firstAttraction) {
+                                    // Add the city to order data
+                                    $order->city = $firstAttraction->location;
+                                }
+                            }
+                        }
+                    }
+                    
+                    return $order;
+                });
                 
-                return $order;
+                // Add orders to tour object
+                $destination = $tour->destination;
+                $country = Country::select('country_image')
+                                    ->where('name', $destination)
+                                    ->first();
+                $tour->destination_image = $country->country_image ?? null;
+                $tourData = $tour->toArray();
+                $tourData['orders'] = $orders;
+                $tourData['total_orders'] = $orders->count();
+                $tourData['agency_name'] = $agency->agency_name;
+                $tourData['agency_phone'] = $agency->phone;
+                $tourData['agency_email'] = $agency->email;
+                $tourData['agency_wp_number'] = $agency->wp_number;
+                return $tourData;
             });
             
-            // Add orders to tour object
-            $destination = $tour->destination;
-            $country = Country::select('country_image')
-                                ->where('name', $destination)
-                                ->first();
-            $tour->destination_image = $country->country_image ?? null;
-            $tourData = $tour->toArray();
-            $tourData['orders'] = $orders;
-            $tourData['total_orders'] = $orders->count();
-            $tourData['agency_name'] = $agency->agency_name;
-            $tourData['agency_phone'] = $agency->phone;
-            $tourData['agency_email'] = $agency->email;
-            $tourData['agency_wp_number'] = $agency->wp_number;
-            return $tourData;
-        });
-        
-        return response()->json([
-            'success' => true,
-            'message' => 'Guest bookings retrieved successfully',
-            'data' => [
-                'tours' => $toursWithOrders,
-                'total_tours' => $toursWithOrders->count()
-            ]
-        ], 200);
+            return response()->json([
+                'success' => true,
+                'message' => 'Guest bookings retrieved successfully',
+                'data' => [
+                    'tours' => $toursWithOrders,
+                    'total_tours' => $toursWithOrders->count()
+                ]
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error retrieving guest bookings. ' . $e->getMessage(),
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 
     function updateGuest(Request $request)
     {
-        $guest = $request->guest; // from middleware
-        $allowed = [
-            'guest_name', 'email', 'contact', 'country_code', 'app_password',
-            'image', 'whatsapp_no', 'salutation', 'share_contact'
-        ];
-
-        foreach ($allowed as $field) {
-            if ($field === 'image') {
-                if ($request->hasFile('image')) {
-                    
-                    $pathData = CommonHelper::image_path('file_storage', $request->file('image'));
-                    
-                    if (!empty($pathData['master_value'])) {
-                        
-                        $guest->image = $pathData['master_value'];
-                    }
+        try {
+            $request->validate([
+                'guest_id' => 'required',
+                'current_password' => 'nullable',
+                'app_password' => 'nullable',
+                'image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
+            ]);
+            $guest = $request->guest; // from middleware
+            if($guest->guest_id != $request->guest_id){
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized',
+                ], 403);
+            }
+            if ($request->filled('app_password')) {
+                if (!Hash::check($request->current_password, $guest->app_password)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Incorrect current password',
+                    ], 403);
                 }
-                continue;
+                $guest->app_password = Hash::make($request->app_password);
             }
-            if (!$request->has($field)) {
-                continue;
-            }
-            $value = $request->input($field);
-            if ($field === 'app_password' && $value !== null && $value !== '') {
-                $guest->app_password = Hash::make($value);
-            } else {
+
+            $allowed = [
+                'guest_name', 'email', 'contact', 'country_code',
+                'image', 'whatsapp_no', 'salutation', 'share_contact'
+            ];
+
+            foreach ($allowed as $field) {
+                if ($field === 'image') {
+                    if ($request->hasFile('image')) {
+                        $pathData = CommonHelper::image_path('file_storage', $request->file('image'));
+                        if (!empty($pathData['master_value'])) {
+                            $guest->image = $pathData['master_value'];
+                        }
+                    }
+                    continue;
+                }
+                if (!$request->has($field)) {
+                    continue;
+                }
+                $value = $request->input($field);
                 $guest->setAttribute($field, $value);
             }
+
+            $guest->save();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Guest updated successfully',
+                'data' => $guest->refresh()
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error updating guest ' . $e->getMessage(),
+                'error' => $e->getMessage()
+            ], 500);
         }
-
-        $guest->save();
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Guest updated successfully',
-            'data' => $guest->refresh()
-        ], 200);
     }
 
     function updateDriver(Request $request)
     {
-        $driver = $request->driver; // from middleware
-
-        if ($request->filled('app_password')) {
-            $driver->app_password = Hash::make($request->input('app_password'));
-        } elseif ($request->filled('password')) {
-            $driver->app_password = Hash::make($request->input('password'));
-        }
-
-        if ($request->hasFile('image')) {
-            $pathData = CommonHelper::image_path('file_storage', $request->file('image'));
-            if (!empty($pathData['master_value'])) {
-                $driver->image = $pathData['master_value'];
+        try {
+            $request->validate([
+                'driver_id' => 'required',
+                'current_password' => 'nullable',
+                'app_password' => 'nullable',
+                'image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
+            ]);
+            $driver = $request->driver; // from middleware
+            if($driver->driver_id != $request->driver_id){
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized',
+                ], 403);
             }
+            if ($request->filled('app_password')) {
+                if (!Hash::check($request->current_password, $driver->app_password)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Incorrect current password',
+                    ], 403);
+                }
+                $driver->app_password = Hash::make($request->app_password);
+            }
+
+            if ($request->hasFile('image')) {
+                $pathData = CommonHelper::image_path('file_storage', $request->file('image'));
+                if (!empty($pathData['master_value'])) {
+                    $driver->image = $pathData['master_value'];
+                }
+            }
+
+            $driver->save();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Driver updated successfully',
+                'data' => $driver->refresh()
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error updating driver. ' . $e->getMessage(),
+                'error' => $e->getMessage()
+            ], 500);
         }
-
-        $driver->save();
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Driver updated successfully',
-            'data' => $driver->refresh()
-        ], 200);
     }
 
     function updateGuide(Request $request)
     {
-        $guide = $request->guide; // from middleware
-
-        if ($request->filled('app_password')) {
-            $guide->app_password = Hash::make($request->input('app_password'));
-        } elseif ($request->filled('password')) {
-            $guide->app_password = Hash::make($request->input('password'));
-        }
-
-        if ($request->hasFile('image')) {
-            $pathData = CommonHelper::image_path('file_storage', $request->file('image'));
-            if (!empty($pathData['master_value'])) {
-                $guide->image = $pathData['master_value'];
+        try {
+            $request->validate([
+                'guide_id' => 'required',
+                'current_password' => 'nullable',
+                'app_password' => 'nullable',
+                'image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
+            ]);
+            $guide = $request->guide; // from middleware
+            if($guide->guide_id != $request->guide_id){
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized',
+                ], 403);
             }
+            if ($request->filled('app_password')) {
+                if (!Hash::check($request->current_password, $guide->app_password)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Incorrect current password',
+                    ], 403);
+                }
+                $guide->app_password = Hash::make($request->app_password);
+            }
+
+            if ($request->hasFile('image')) {
+                $pathData = CommonHelper::image_path('file_storage', $request->file('image'));
+                if (!empty($pathData['master_value'])) {
+                    $guide->image = $pathData['master_value'];
+                }
+            }
+
+            $guide->save();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Guide updated successfully',
+                'data' => $guide->refresh()
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error updating guide',
+                'error' => $e->getMessage()
+            ], 500);
         }
-
-        $guide->save();
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Guide updated successfully',
-            'data' => $guide->refresh()
-        ], 200);
     }
 
     public function updateJobsheetStatus(Request $request)
     {
-        // Validate request data
-        $request->validate([
-            'id' => 'required|integer',
-            'status' => 'required|integer', // status is an integer
-        ]);
+        try {
+            // Validate request data
+            $request->validate([
+                'id' => 'required|integer',
+                'status' => 'required|integer', // status is an integer
+            ]);
 
-        $jobsheet = Jobsheet::where('jobsheet_id', $request->id)->first();
+            $jobsheet = Jobsheet::where('jobsheet_id', $request->id)->first();
 
-        if (!$jobsheet) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Jobsheet not found with the provided ID',
-                'data' => null
-            ], 404);
-        }
-
-        $tour_id = $jobsheet->tour_id;
-        
-        // Query guests where tour_id array contains the jobsheet's tour_id
-        // Handle both JSON array and direct value cases
-        $guestEmails = Guest::where(function($query) use ($tour_id) {
-            // If tour_id is stored as JSON array, check if it contains the value
-            $query->whereJsonContains('tour_id', $tour_id)
-                  // Also handle direct value match (in case some records have single value)
-                  ->orWhere('tour_id', $tour_id);
-        })->pluck('email')->unique()->toArray();
-        // Define status mapping based on jobsheet type
-        $driverStatusMap = [
-            1 => 'started',
-            2 => 'arrived',
-            3 => 'picked',
-            4 => 'completed',
-        ];
-
-        $guideStatusMap = [
-            1 => 'started',
-            2 => 'arrived',
-            3 => 'completed',
-        ];
-
-        // Choose the right map based on type (driver-style types use driverStatusMap, else guideStatusMap)
-        $driverTypes = ['driver', 'travel_hourly', 'entry_port', 'local_transport', 'travel_point', 'attraction', 'restaurant', 'exit_port'];
-        $statusMap = in_array($jobsheet->type, $driverTypes) ? $driverStatusMap : $guideStatusMap;
-        
-        // Get the corresponding status text (fallback to numeric if not found)
-        $statusText = $statusMap[$request->status] ?? $request->status;
-        
-        // Update jobsheet fields
-        $jobsheet->current_status = $request->status;
-        $jobsheet->reach_time = $request->reach_time ?? '';
-        $jobsheet->comments = $request->comments ? json_encode($request->comments) : json_encode([]);
-        $jobsheet->save();
-        
-        // Send notification to guests if any
-        if (!empty($guestEmails)) {
-            // Fetch driver and guide details for richer notification context
-            $driver = null;
-            $guide = null;
-            if (!empty($jobsheet->driver_id)) {
-                $driver = Driver::select('driver_id', 'name')->where('driver_id', $jobsheet->driver_id)->first();
-            }
-            if (!empty($jobsheet->guide_id)) {
-                $guide = Guide::select('guide_id', 'name')->where('guide_id', $jobsheet->guide_id)->first();
+            if (!$jobsheet) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Jobsheet not found with the provided ID',
+                    'data' => null
+                ], 404);
             }
 
-            $driverIdForMsg = $driver ? $driver->driver_id : 'N/A';
-            $driverNameForMsg = $driver ? $driver->name : 'N/A';
-            $guideIdForMsg = $guide ? $guide->guide_id : 'N/A';
-            $guideNameForMsg = $guide ? $guide->name : 'N/A';
-
-            // Vehicle details
-            $vehicleNameForMsg = 'N/A';
-            $vehicleNumberForMsg = null;
-            $vehicleColorForMsg = null;
-            if (!empty($jobsheet->vehicle_id)) {
-                $vehicle = Vehicle::where('vehicle_id', $jobsheet->vehicle_id)->first();
-                if ($vehicle) {
-                    $vehicleNameForMsg = $vehicle->vehicle_name ?? 'N/A';
-                    $vehicleNumberForMsg = $vehicle->vehicle_number
-                        ?? $vehicle->registration_no
-                        ?? $vehicle->registration_number
-                        ?? $vehicle->plate_number
-                        ?? null;
-                    $vehicleColorForMsg = $vehicle->vehicle_color ?? null;
-                }
-            }
+            $tour_id = $jobsheet->tour_id;
             
-            // Guide languages
-            $guideLanguages = [];
-            if (!empty($jobsheet->guide_id)) {
-                $guideLanguages = \App\Models\GuideLanguage::where('guide_id', $jobsheet->guide_id)
-                    ->pluck('language')
-                    ->toArray();
-            }
+            // Query guests where tour_id array contains the jobsheet's tour_id
+            // Handle both JSON array and direct value cases
+            $guestEmails = Guest::where(function($query) use ($tour_id) {
+                // If tour_id is stored as JSON array, check if it contains the value
+                $query->whereJsonContains('tour_id', $tour_id)
+                    // Also handle direct value match (in case some records have single value)
+                    ->orWhere('tour_id', $tour_id);
+            })->pluck('email')->unique()->toArray();
+            // Define status mapping based on jobsheet type
+            $driverStatusMap = [
+                1 => 'started',
+                2 => 'arrived',
+                3 => 'picked',
+                4 => 'completed',
+            ];
 
-            // Pickup/Drop details from order data
-            $pickupLocation = null;
-            $dropLocation = null;
-            if (!empty($jobsheet->order_id)) {
-                $order = Order::select('data')->where('booking_id', $jobsheet->order_id)->first();
-                if ($order && $order->data) {
-                    $orderData = is_string($order->data) ? json_decode($order->data, true) : $order->data;
-                    if (isset($orderData[0]) && is_array($orderData[0])) {
-                        $data = $orderData[0];
-                        $pickupLocation = $data['entrypickup'] ?? ($data['PickupPlaceid'] ?? null);
-                        $dropLocation = $data['entrydropoff'] ?? ($data['DropoffPlaceid'] ?? null);
+            $guideStatusMap = [
+                1 => 'started',
+                2 => 'arrived',
+                3 => 'completed',
+            ];
+
+            // Choose the right map based on type (driver-style types use driverStatusMap, else guideStatusMap)
+            $driverTypes = ['driver', 'travel_hourly', 'entry_port', 'local_transport', 'travel_point', 'attraction', 'restaurant', 'exit_port'];
+            $statusMap = in_array($jobsheet->type, $driverTypes) ? $driverStatusMap : $guideStatusMap;
+            
+            // Get the corresponding status text (fallback to numeric if not found)
+            $statusText = $statusMap[$request->status] ?? $request->status;
+            
+            // Update jobsheet fields
+            $jobsheet->current_status = $request->status;
+            $jobsheet->reach_time = $request->reach_time ?? '';
+            $jobsheet->comments = $request->comments ? json_encode($request->comments) : json_encode([]);
+            $jobsheet->save();
+            
+            // Send notification to guests if any
+            if (!empty($guestEmails)) {
+                // Fetch driver and guide details for richer notification context
+                $driver = null;
+                $guide = null;
+                if (!empty($jobsheet->driver_id)) {
+                    $driver = Driver::select('driver_id', 'name')->where('driver_id', $jobsheet->driver_id)->first();
+                }
+                if (!empty($jobsheet->guide_id)) {
+                    $guide = Guide::select('guide_id', 'name')->where('guide_id', $jobsheet->guide_id)->first();
+                }
+
+                $driverIdForMsg = $driver ? $driver->driver_id : 'N/A';
+                $driverNameForMsg = $driver ? $driver->name : 'N/A';
+                $guideIdForMsg = $guide ? $guide->guide_id : 'N/A';
+                $guideNameForMsg = $guide ? $guide->name : 'N/A';
+
+                // Vehicle details
+                $vehicleNameForMsg = 'N/A';
+                $vehicleNumberForMsg = null;
+                $vehicleColorForMsg = null;
+                if (!empty($jobsheet->vehicle_id)) {
+                    $vehicle = Vehicle::where('vehicle_id', $jobsheet->vehicle_id)->first();
+                    if ($vehicle) {
+                        $vehicleNameForMsg = $vehicle->vehicle_name ?? 'N/A';
+                        $vehicleNumberForMsg = $vehicle->vehicle_number
+                            ?? $vehicle->registration_no
+                            ?? $vehicle->registration_number
+                            ?? $vehicle->plate_number
+                            ?? null;
+                        $vehicleColorForMsg = $vehicle->vehicle_color ?? null;
                     }
                 }
+                
+                // Guide languages
+                $guideLanguages = [];
+                if (!empty($jobsheet->guide_id)) {
+                    $guideLanguages = \App\Models\GuideLanguage::where('guide_id', $jobsheet->guide_id)
+                        ->pluck('language')
+                        ->toArray();
+                }
+
+                // Pickup/Drop details from order data
+                $pickupLocation = null;
+                $dropLocation = null;
+                if (!empty($jobsheet->order_id)) {
+                    $order = Order::select('data')->where('booking_id', $jobsheet->order_id)->first();
+                    if ($order && $order->data) {
+                        $orderData = is_string($order->data) ? json_decode($order->data, true) : $order->data;
+                        if (isset($orderData[0]) && is_array($orderData[0])) {
+                            $data = $orderData[0];
+                            $pickupLocation = $data['entrypickup'] ?? ($data['PickupPlaceid'] ?? null);
+                            $dropLocation = $data['entrydropoff'] ?? ($data['DropoffPlaceid'] ?? null);
+                        }
+                    }
+                }
+
+                // Comments
+                $commentsDecoded = json_decode($jobsheet->comments, true);
+                $commentsText = '';
+                if (is_array($commentsDecoded)) {
+                    $commentsText = implode(', ', array_map(function ($c) {
+                        return is_array($c) ? json_encode($c) : (string)$c;
+                    }, $commentsDecoded));
+                } elseif (is_string($commentsDecoded)) {
+                    $commentsText = $commentsDecoded;
+                    $commentsDecoded = [$commentsDecoded];
+                } else {
+                    $commentsDecoded = [];
+                }
+
+                // Use default icon (no image to avoid notification display issues)
+                $iconUrl = null; // Set to null to use default notification icon
+
+                // Build title and body including driver/guide details (conditional on jobsheet type)
+                // Use shorter title
+                $title = 'Status: ' . ucfirst($statusText);
+                
+                // Build concise body that fits mobile notification limits (~200 chars)
+                if ($jobsheet->type === 'guide') {
+                    // For guide jobsheets: compact format
+                    $bodyLines = [];
+                    
+                    // Line 1: Guide info
+                    $bodyLines[] = 'Guide: ' . $guideNameForMsg;
+                    
+                    // Line 2: Languages
+                    if (!empty($guideLanguages)) {
+                        $languagesText = implode(', ', $guideLanguages);
+                        $maxLangLength = 80;
+                        $shortLanguages = strlen($languagesText) > $maxLangLength 
+                            ? substr($languagesText, 0, $maxLangLength) . '...' 
+                            : $languagesText;
+                        $bodyLines[] = 'Languages: ' . $shortLanguages;
+                    }
+                    
+                    // Line 3: Comments (truncate if too long)
+                    if (!empty($commentsText)) {
+                        $maxCommentLength = 100;
+                        $shortComments = strlen($commentsText) > $maxCommentLength 
+                            ? substr($commentsText, 0, $maxCommentLength) . '...' 
+                            : $commentsText;
+                        $bodyLines[] = 'Note: ' . $shortComments;
+                    }
+                    
+                    $body = implode("\n", $bodyLines);
+                } else {
+                    // For driver jobsheets: compact format with priority info first
+                    $bodyLines = [];
+                    
+                    // Line 1: Driver info (most important)
+                    $driverLine = 'Driver: ' . $driverNameForMsg;
+                    if ($driverIdForMsg !== 'N/A') {
+                        $driverLine .= ' (#' . $driverIdForMsg . ')';
+                    }
+                    $bodyLines[] = $driverLine;
+                    
+                    // Line 2: Vehicle info (with color if available)
+                    $vehicleLine = 'Vehicle: ' . $vehicleNameForMsg;
+                    if ($vehicleNumberForMsg) {
+                        $vehicleLine .= ' - ' . $vehicleNumberForMsg;
+                    }
+                    if ($vehicleColorForMsg) {
+                        $vehicleLine .= ' (' . $vehicleColorForMsg . ')';
+                    }
+                    $bodyLines[] = $vehicleLine;
+                    
+                    // Line 3: Pickup (truncate if too long)
+                    if ($pickupLocation) {
+                        $maxLocationLength = 60;
+                        $shortPickup = strlen($pickupLocation) > $maxLocationLength 
+                            ? substr($pickupLocation, 0, $maxLocationLength) . '...' 
+                            : $pickupLocation;
+                        $bodyLines[] = 'Pickup: ' . $shortPickup;
+                    }
+                    
+                    // Line 4: Drop (truncate if too long)
+                    if ($dropLocation) {
+                        $maxLocationLength = 60;
+                        $shortDrop = strlen($dropLocation) > $maxLocationLength 
+                            ? substr($dropLocation, 0, $maxLocationLength) . '...' 
+                            : $dropLocation;
+                        $bodyLines[] = 'Drop: ' . $shortDrop;
+                    }
+                    
+                    // Line 5: Comments (truncate if too long)
+                    if (!empty($commentsText)) {
+                        $maxCommentLength = 80;
+                        $shortComments = strlen($commentsText) > $maxCommentLength 
+                            ? substr($commentsText, 0, $maxCommentLength) . '...' 
+                            : $commentsText;
+                        $bodyLines[] = 'Note: ' . $shortComments;
+                    }
+                    
+                    // Join with newlines for better readability
+                    $body = implode("\n", $bodyLines);
+                }
+
+                // Build data payload conditionally
+                $dataPayload = [
+                    'type' => 'jobsheet_update',
+                    'jobsheet_id' => $request->id,
+                    'status' => $statusText,
+                    'tour_id' => $tour_id,
+                ];
+                if ($jobsheet->type === 'guide') {
+                    $dataPayload['guide_name'] = $guide ? $guide->name : null;
+                    $dataPayload['guide_languages'] = !empty($guideLanguages) ? $guideLanguages : [];
+                    $dataPayload['comments'] = $commentsDecoded;
+                } else {
+                    $dataPayload['driver_name'] = $driver ? $driver->name : null;
+                    $dataPayload['vehicle_name'] = $vehicleNameForMsg !== 'N/A' ? $vehicleNameForMsg : null;
+                    $dataPayload['vehicle_number'] = $vehicleNumberForMsg;
+                    $dataPayload['vehicle_color'] = $vehicleColorForMsg;
+                    $dataPayload['pickup_location'] = $pickupLocation;
+                    $dataPayload['drop_location'] = $dropLocation;
+                    $dataPayload['comments'] = $commentsDecoded;
+                }
+
+                $notificationResult = \App\Helpers\NotificationHelper::sendNotificationToGuest(
+                    $guestEmails,
+                    $title,
+                    $body,
+                    $iconUrl,
+                    $dataPayload
+                );
+
+                \Log::info('Notification sent to guests', ['result' => $notificationResult]);
             }
 
-            // Comments
-            $commentsDecoded = json_decode($jobsheet->comments, true);
-            $commentsText = '';
-            if (is_array($commentsDecoded)) {
-                $commentsText = implode(', ', array_map(function ($c) {
-                    return is_array($c) ? json_encode($c) : (string)$c;
-                }, $commentsDecoded));
-            } elseif (is_string($commentsDecoded)) {
-                $commentsText = $commentsDecoded;
-                $commentsDecoded = [$commentsDecoded];
-            } else {
-                $commentsDecoded = [];
-            }
-
-            // Use default icon (no image to avoid notification display issues)
-            $iconUrl = null; // Set to null to use default notification icon
-
-            // Build title and body including driver/guide details (conditional on jobsheet type)
-            // Use shorter title
-            $title = 'Status: ' . ucfirst($statusText);
-            
-            // Build concise body that fits mobile notification limits (~200 chars)
-            if ($jobsheet->type === 'guide') {
-                // For guide jobsheets: compact format
-                $bodyLines = [];
-                
-                // Line 1: Guide info
-                $bodyLines[] = 'Guide: ' . $guideNameForMsg;
-                
-                // Line 2: Languages
-                if (!empty($guideLanguages)) {
-                    $languagesText = implode(', ', $guideLanguages);
-                    $maxLangLength = 80;
-                    $shortLanguages = strlen($languagesText) > $maxLangLength 
-                        ? substr($languagesText, 0, $maxLangLength) . '...' 
-                        : $languagesText;
-                    $bodyLines[] = 'Languages: ' . $shortLanguages;
-                }
-                
-                // Line 3: Comments (truncate if too long)
-                if (!empty($commentsText)) {
-                    $maxCommentLength = 100;
-                    $shortComments = strlen($commentsText) > $maxCommentLength 
-                        ? substr($commentsText, 0, $maxCommentLength) . '...' 
-                        : $commentsText;
-                    $bodyLines[] = 'Note: ' . $shortComments;
-                }
-                
-                $body = implode("\n", $bodyLines);
-            } else {
-                // For driver jobsheets: compact format with priority info first
-                $bodyLines = [];
-                
-                // Line 1: Driver info (most important)
-                $driverLine = 'Driver: ' . $driverNameForMsg;
-                if ($driverIdForMsg !== 'N/A') {
-                    $driverLine .= ' (#' . $driverIdForMsg . ')';
-                }
-                $bodyLines[] = $driverLine;
-                
-                // Line 2: Vehicle info (with color if available)
-                $vehicleLine = 'Vehicle: ' . $vehicleNameForMsg;
-                if ($vehicleNumberForMsg) {
-                    $vehicleLine .= ' - ' . $vehicleNumberForMsg;
-                }
-                if ($vehicleColorForMsg) {
-                    $vehicleLine .= ' (' . $vehicleColorForMsg . ')';
-                }
-                $bodyLines[] = $vehicleLine;
-                
-                // Line 3: Pickup (truncate if too long)
-                if ($pickupLocation) {
-                    $maxLocationLength = 60;
-                    $shortPickup = strlen($pickupLocation) > $maxLocationLength 
-                        ? substr($pickupLocation, 0, $maxLocationLength) . '...' 
-                        : $pickupLocation;
-                    $bodyLines[] = 'Pickup: ' . $shortPickup;
-                }
-                
-                // Line 4: Drop (truncate if too long)
-                if ($dropLocation) {
-                    $maxLocationLength = 60;
-                    $shortDrop = strlen($dropLocation) > $maxLocationLength 
-                        ? substr($dropLocation, 0, $maxLocationLength) . '...' 
-                        : $dropLocation;
-                    $bodyLines[] = 'Drop: ' . $shortDrop;
-                }
-                
-                // Line 5: Comments (truncate if too long)
-                if (!empty($commentsText)) {
-                    $maxCommentLength = 80;
-                    $shortComments = strlen($commentsText) > $maxCommentLength 
-                        ? substr($commentsText, 0, $maxCommentLength) . '...' 
-                        : $commentsText;
-                    $bodyLines[] = 'Note: ' . $shortComments;
-                }
-                
-                // Join with newlines for better readability
-                $body = implode("\n", $bodyLines);
-            }
-
-            // Build data payload conditionally
-            $dataPayload = [
-                'type' => 'jobsheet_update',
-                'jobsheet_id' => $request->id,
-                'status' => $statusText,
-                'tour_id' => $tour_id,
-            ];
-            if ($jobsheet->type === 'guide') {
-                $dataPayload['guide_name'] = $guide ? $guide->name : null;
-                $dataPayload['guide_languages'] = !empty($guideLanguages) ? $guideLanguages : [];
-                $dataPayload['comments'] = $commentsDecoded;
-            } else {
-                $dataPayload['driver_name'] = $driver ? $driver->name : null;
-                $dataPayload['vehicle_name'] = $vehicleNameForMsg !== 'N/A' ? $vehicleNameForMsg : null;
-                $dataPayload['vehicle_number'] = $vehicleNumberForMsg;
-                $dataPayload['vehicle_color'] = $vehicleColorForMsg;
-                $dataPayload['pickup_location'] = $pickupLocation;
-                $dataPayload['drop_location'] = $dropLocation;
-                $dataPayload['comments'] = $commentsDecoded;
-            }
-
-            $notificationResult = \App\Helpers\NotificationHelper::sendNotificationToGuest(
-                $guestEmails,
-                $title,
-                $body,
-                $iconUrl,
-                $dataPayload
-            );
-
-            \Log::info('Notification sent to guests', ['result' => $notificationResult]);
+            return response()->json([
+                'success' => true,
+                'message' => 'Jobsheet updated successfully',
+                'data' => $jobsheet->refresh()
+            ], 200);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed. ' . $e->getMessage(),
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error updating jobsheet status. ' . $e->getMessage(),
+                'error' => $e->getMessage()
+            ], 500);
         }
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Jobsheet updated successfully',
-            'data' => $jobsheet->refresh()
-        ], 200);
     }
 
     /**
@@ -1294,7 +1388,7 @@ class AuthController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Error deleting account',
+                'message' => 'Error deleting account. ' . $e->getMessage(),
                 'error' => $e->getMessage(),
             ], 500);
         }
@@ -1512,7 +1606,7 @@ class AuthController extends Controller
             } catch (\Exception $e) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Error retrieving driver jobsheets',
+                    'message' => 'Error retrieving driver jobsheets. ' . $e->getMessage(),
                     'error' => $e->getMessage()
                 ], 500);
             }
@@ -1634,11 +1728,10 @@ class AuthController extends Controller
             } catch (\Exception $e) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Error retrieving guide jobsheets',
+                    'message' => 'Error retrieving guide jobsheets. ' . $e->getMessage(),
                     'error' => $e->getMessage()
                 ], 500);
             }
         }
     }
-
 }
