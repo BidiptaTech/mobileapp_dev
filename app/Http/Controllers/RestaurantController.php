@@ -61,6 +61,7 @@ class RestaurantController extends Controller
                 'restaurant_id' => $restaurant->restaurant_id,
                 'restaurant_name' => $restaurant->name,
                 'restaurant_email' => $restaurant->email,
+                'profile_image' => $restaurant->profile_image,
                 'dmcDetails' => $dmcDetails
             );
 
@@ -74,13 +75,13 @@ class RestaurantController extends Controller
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Validation failed',
+                'message' => 'Validation failed.' . $e->getMessage(),
                 'errors' => $e->errors(),
             ], 422);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Error logging in restaurant',
+                'message' => 'Error logging in restaurant.' . $e->getMessage(),
                 'error' => $e->getMessage(),
             ], 500);
         }
@@ -109,7 +110,7 @@ class RestaurantController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Error during logout',
+                'message' => 'Error during logout. ' . $e->getMessage(),
                 'error' => $e->getMessage(),
             ], 500);
         }
@@ -251,7 +252,7 @@ class RestaurantController extends Controller
         }catch(\Exception $e){
             return response()->json([
                 'success' => false,
-                'message' => 'Error updating restaurant details',
+                'message' => 'Error updating restaurant details. ' . $e->getMessage(),
                 'error' => $e->getMessage(),
             ], 500);
         }
@@ -349,7 +350,7 @@ class RestaurantController extends Controller
     }catch(\Exception $e){
         return response()->json([
             'success' => false,
-            'message' => 'Error deleting restaurant account',
+            'message' => 'Error deleting restaurant account. ' . $e->getMessage(),
             'error' => $e->getMessage(),
         ], 500);
     } 
