@@ -20,6 +20,7 @@
 /storage/*.key
 /storage/pail
 /vendor
+/storage/app/firebase/firebase_crendentials.json
 
 Homestead.json
 Homestead.yaml
