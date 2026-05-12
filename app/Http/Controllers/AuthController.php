@@ -35,37 +35,38 @@ class AuthController extends Controller
         try {
             $email = $request->email;
             $password = $request->password;
-            $userType = $request->user_type;
+            $userType = strtolower((string) ($request->input('type') ?: $request->input('user_type')));
+
             if (!$email || !$password) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Email and password are required',
-                    'message' => 'Email and password are required',
                 ], 400);
             }
 
-            // Route to appropriate login function
-            $driver = Driver::where('email', $email)->first();
-            if ($driver && Hash::check($password, $driver->app_password) && $userType == 'driver') {
-                return $this->driverLogin($request);
+            if (!$userType) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Type is required',
+                ], 400);
             }
-            
-            $guide = Guide::where('email', $email)->orderBy('id', 'desc')->first();
-            
-            if ($guide && Hash::check($password, $guide->app_password) && $userType == 'guide') {
-                return $this->guideLogin($request);
-            }
-            
-            $guest = Guest::where('email', $email)->orderBy('id', 'desc')->first();
 
-            if ($guest && Hash::check($password, $guest->app_password) && $userType == 'guest') {
-                return $this->guestLogin($request);
-            }
-            
-           return response()->json([
-                'success' => false,
-                'message' => 'No user found with this email and password',
-            ], 400); 
+            $request->merge([
+                'user_type' => $userType,
+                'type' => $userType,
+            ]);
+
+            return match ($userType) {
+                'driver' => $this->driverLogin($request),
+                'guide' => $this->guideLogin($request),
+                'guest' => $this->guestLogin($request),
+                'agent' => $this->agentLogin($request),
+                'dmc' => $this->dmcLogin($request),
+                default => response()->json([
+                    'success' => false,
+                    'message' => 'Valid type is required (driver, guide, guest, agent, dmc)',
+                ], 400),
+            };
 
         } catch (\Exception $e) {
             return response()->json([
@@ -583,6 +584,181 @@ class AuthController extends Controller
                 'success' => false,
                 'message' => 'Error during guest authentication. ' . $e->getMessage(),
                 'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Agent login function
+     */
+    public function agentLogin(Request $request)
+    {
+        $email = $request->email;
+        $password = $request->password;
+
+        try {
+            if (!$email || !$password) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Email and password are required',
+                ], 400);
+            }
+
+            $agents = Agent::select([
+                    'name',
+                    'salutation',
+                    'agent_id',
+                    'email',
+                    'phone',
+                    'agent_image',
+                    'image',
+                    'country',
+                    'company_name',
+                    'id_number',
+                    'user_country',
+                    'city',
+                    'code',
+                    'agent_address',
+                    'dmc_id',
+                    'designation',
+                    'password',
+                ])
+                ->where('email', $email)
+                ->orderBy('agent_id', 'desc')
+                ->get();
+
+            $agent = $agents->first(function ($candidate) use ($password) {
+                return $this->passwordMatches($password, $candidate->password);
+            });
+
+            if (!$agent) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Agent not found or invalid credentials',
+                ], 404);
+            }
+
+            $dmc = null;
+            if (!empty($agent->agent_id)) {
+                $dmc = (new Agent())->getDmc($agent->agent_id);
+            }
+
+            $token = $agent->createToken('agent-token')->plainTextToken;
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Agent authenticated successfully',
+                'data' => [
+                    'agent' => [
+                        'name' => $agent->name,
+                        'saluation' => $agent->salutation,
+                        'agent_id' => $agent->agent_id,
+                        'email' => $agent->email,
+                        'phone' => $agent->phone,
+                        'agent_image' => $agent->agent_image,
+                        'image' => $agent->image,
+                        'country' => $agent->country,
+                        'company_name' => $agent->company_name,
+                        'id_number' => $agent->id_number,
+                        'user_country' => $agent->user_country,
+                        'city' => $agent->city,
+                        'code' => $agent->code,
+                        'agent_address' => $agent->agent_address,
+                        'dmc_id' => $agent->dmc_id,
+                        'designation' => $agent->designation,
+                    ],
+                    'token' => $token,
+                    'role' => 'agent',
+                    'dmc_info' => $dmc,
+                ],
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error during agent authentication',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * DMC login function
+     */
+    public function dmcLogin(Request $request)
+    {
+        $email = $request->email;
+        $password = $request->password;
+
+        try {
+            if (!$email || !$password) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Email and password are required',
+                ], 400);
+            }
+
+            $dmcs = User::select([
+                    'userId',
+                    'name',
+                    'salutation',
+                    'email',
+                    'country_code',
+                    'phone',
+                    'dmcId',
+                    'country',
+                    'company_name',
+                    'city',
+                    'address',
+                    'user_country',
+                    'profile_image',
+                    'licence_no',
+                    'password',
+                ])
+                ->where('email', $email)
+                ->orderBy('userId', 'desc')
+                ->get();
+
+            $dmc = $dmcs->first(function ($candidate) use ($password) {
+                return $this->passwordMatches($password, $candidate->password);
+            });
+
+            if (!$dmc) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'DMC not found or invalid credentials',
+                ], 404);
+            }
+
+            $token = $dmc->createToken('dmc-token')->plainTextToken;
+
+            return response()->json([
+                'success' => true,
+                'message' => 'DMC authenticated successfully',
+                'data' => [
+                    'dmc' => [
+                        'name' => $dmc->name,
+                        'salutation' => $dmc->salutation,
+                        'email' => $dmc->email,
+                        'country_code' => $dmc->country_code,
+                        'phone' => $dmc->phone,
+                        'dmcId' => $dmc->dmcId,
+                        'country' => $dmc->country,
+                        'company_name' => $dmc->company_name,
+                        'city' => $dmc->city,
+                        'address' => $dmc->address,
+                        'user_country' => $dmc->user_country,
+                        'profile_image' => $dmc->profile_image,
+                        'licence_no' => $dmc->licence_no,
+                    ],
+                    'token' => $token,
+                    'role' => 'dmc',
+                ],
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error during dmc authentication',
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -1412,6 +1588,21 @@ class AuthController extends Controller
                 return 'restaurant';
             default:
                 return 'user';
+        }
+    }
+
+    private function passwordMatches(string $plainPassword, ?string $hashedPassword): bool
+    {
+        if (!is_string($hashedPassword) || trim($hashedPassword) === '') {
+            return false;
+        }
+
+        $hashedPassword = trim($hashedPassword);
+
+        try {
+            return Hash::check($plainPassword, $hashedPassword);
+        } catch (\Throwable $e) {
+            return password_verify($plainPassword, $hashedPassword);
         }
     }
 
