@@ -41,6 +41,7 @@ class AuthController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'Email and password are required',
+                    'message' => 'Email and password are required',
                 ], 400);
             }
 
