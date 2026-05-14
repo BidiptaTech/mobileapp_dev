@@ -21,7 +21,8 @@
 /storage/*.key
 /storage/pail
 /vendor
-/storage/app/firebase/firebase_crendentials.json
+# Never commit Firebase / GCP service account JSON (GitHub push protection)
+/storage/app/firebase/*.json
 
 Homestead.json
 Homestead.yaml
