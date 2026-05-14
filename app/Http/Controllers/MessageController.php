@@ -10,8 +10,7 @@ use App\Models\Jobsheet;
 use App\Models\Tour;
 use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Config;
-use Kreait\Firebase\Factory;
+use Kreait\Firebase\Contract\Database;
 
 class MessageController extends Controller
 {
@@ -282,38 +281,13 @@ class MessageController extends Controller
         }
     }
 
-    private function createFirebaseDatabase()
+    /**
+     * Use the Kreait Laravel Firebase bundle so credentials, database URL, HTTP options,
+     * and auth token cache match the rest of the app (see config/firebase.php).
+     */
+    private function createFirebaseDatabase(): Database
     {
-        $firebase = new Factory;
-        $credentialsPath = Config::get('firebase.projects.app.credentials');
-        $databaseUrl = Config::get('firebase.projects.app.database.url')
-            ?: 'https://travhorse-96ee0-default-rtdb.asia-southeast1.firebasedatabase.app';
-
-        if ((!is_string($credentialsPath) || $credentialsPath === '') && !getenv('GOOGLE_APPLICATION_CREDENTIALS')) {
-            throw new \RuntimeException(
-                'Firebase credentials are not configured. Set FIREBASE_CREDENTIALS in .env to the full path of your service-account JSON file.'
-            );
-        }
-
-        if (is_string($credentialsPath) && $credentialsPath !== '') {
-            $resolvedCredentialsPath = $credentialsPath;
-
-            if (!is_file($resolvedCredentialsPath)) {
-                $resolvedCredentialsPath = base_path($credentialsPath);
-            }
-
-            if (!is_file($resolvedCredentialsPath)) {
-                throw new \RuntimeException(
-                    'Firebase credentials file not found. Set FIREBASE_CREDENTIALS in .env to a valid service-account JSON path.'
-                );
-            }
-
-            $firebase = $firebase->withServiceAccount($resolvedCredentialsPath);
-        }
-
-        return $firebase
-            ->withDatabaseUri($databaseUrl)
-            ->createDatabase();
+        return app(Database::class);
     }
 
     private function matchesAuthenticatedUser($user, string $type, int $id): bool
