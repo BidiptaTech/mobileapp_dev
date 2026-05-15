@@ -23,12 +23,15 @@ class MessageController extends Controller
         $validated = $request->validate([
             'tour_id' => ['required', 'integer'],
             'id' => ['required', 'integer'],
-            'type' => ['required', 'in:guest,driver,guide'],
+            'type' => ['required', 'in:guest,driver,guide,agent,dmc'],
         ]);
 
         $user = $request->user();
+        $type = $validated['type'];
+        $userId = (int) $validated['id'];
+        $tourId = (int) $validated['tour_id'];
 
-        if (!$this->matchesAuthenticatedUser($user, $validated['type'], (int) $validated['id'])) {
+        if (!$this->matchesAuthenticatedUser($user, $type, $userId)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Authenticated user does not match the provided type and id.',
@@ -37,7 +40,7 @@ class MessageController extends Controller
 
         try {
             $database = $this->createFirebaseDatabase();
-            $chatReference = $database->getReference('chat/' . $validated['tour_id']);
+            $chatReference = $database->getReference('chat/' . $tourId);
             $chatSnapshot = $chatReference->getSnapshot();
 
             if (!$chatSnapshot->exists()) {
@@ -49,14 +52,14 @@ class MessageController extends Controller
 
             $chatRoom = $chatSnapshot->getValue() ?? [];
 
-            if (!$this->isUserAllowedInChatRoom($chatRoom, $validated['type'], (int) $validated['id'])) {
+            if (!$this->isUserAllowedInChatRoom($chatRoom, $type, $userId, $tourId)) {
                 return response()->json([
                     'success' => false,
                     'message' => 'User is not authorized to send messages in this chat room.',
                 ], 403);
             }
 
-            $messageReference = $database->getReference('chat/' . $validated['tour_id'] . '/Message');
+            $messageReference = $database->getReference('chat/' . $tourId . '/Message');
 
             if (!$messageReference->getSnapshot()->exists()) {
                 $messageReference->set([]);
@@ -66,7 +69,7 @@ class MessageController extends Controller
                 'success' => true,
                 'message' => 'User validated and Message node initialized successfully.',
                 'data' => [
-                    'tour_id' => (int) $validated['tour_id'],
+                    'tour_id' => $tourId,
                     'message_initialized' => true,
                 ],
             ]);
@@ -296,12 +299,18 @@ class MessageController extends Controller
             'guest' => $user instanceof Guest && (int) $user->guest_id === $id,
             'driver' => $user instanceof Driver && (int) $user->driver_id === $id,
             'guide' => $user instanceof Guide && (int) $user->guide_id === $id,
+            'agent' => $user instanceof Agent && (int) $user->agent_id === $id,
+            'dmc' => $user instanceof User && (int) $user->userId === $id,
             default => false,
         };
     }
 
-    private function isUserAllowedInChatRoom(array $chatRoom, string $type, int $id): bool
+    private function isUserAllowedInChatRoom(array $chatRoom, string $type, int $id, int $tourId): bool
     {
+        if (in_array($type, ['agent', 'dmc'], true)) {
+            return $this->isAgentOrDmcAllowedInChatRoom($chatRoom, $type, $id, $tourId);
+        }
+
         if ($type === 'guest') {
             return isset($chatRoom['guestId']) && (int) $chatRoom['guestId'] === $id;
         }
@@ -323,6 +332,38 @@ class MessageController extends Controller
         }
 
         return false;
+    }
+
+    /**
+     * Agent/DMC: load dmc_id from tours for tour_id; allow only if Firebase chat/{tour_id}
+     * has the same dmc_id and the user is allowed for that tour (agent_id or dmc userId).
+     */
+    private function isAgentOrDmcAllowedInChatRoom(array $chatRoom, string $type, int $id, int $tourId): bool
+    {
+        if (isset($chatRoom['tour_id']) && (int) $chatRoom['tour_id'] !== $tourId) {
+            return false;
+        }
+
+        $tour = Tour::query()
+            ->select('tour_id', 'agent_id', 'dmc_id')
+            ->where('tour_id', $tourId)
+            ->first();
+
+        if (!$tour || $tour->dmc_id === null || $tour->dmc_id === '') {
+            return false;
+        }
+
+        $tourDmcId = (int) $tour->dmc_id;
+
+        if (!isset($chatRoom['dmc_id']) || (int) $chatRoom['dmc_id'] !== $tourDmcId) {
+            return false;
+        }
+
+        if ($type === 'dmc') {
+            return $id === $tourDmcId;
+        }
+
+        return (int) $tour->agent_id === $id;
     }
 
     private function buildTourChatroomPayload(Tour $tour): array
