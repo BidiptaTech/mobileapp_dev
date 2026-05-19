@@ -22,7 +22,7 @@ class LostFoundController extends Controller
             'tour_id' => ['required', 'integer'],
             'dmc_id' => ['required', 'integer'],
             'guest_images' => ['sometimes', 'nullable', 'array'],
-            'guest_images.*' => ['nullable', 'string', 'max:4096'],
+            'guest_images.*' => ['nullable', 'string', 'max:16777216'],
         ]);
 
         $tour = Tour::query()

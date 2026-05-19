@@ -10,6 +10,7 @@ use App\Models\Jobsheet;
 use App\Models\Tour;
 use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Kreait\Firebase\Contract\Database;
 
 class MessageController extends Controller
@@ -24,6 +25,12 @@ class MessageController extends Controller
             'tour_id' => ['required', 'integer'],
             'id' => ['required', 'integer'],
             'type' => ['required', 'in:guest,driver,guide,agent,dmc'],
+            'dmc_email' => [
+                Rule::requiredIf(fn () => strtolower((string) $request->input('type')) === 'dmc'),
+                'nullable',
+                'email',
+                'max:255',
+            ],
         ]);
 
         $user = $request->user();
@@ -63,6 +70,23 @@ class MessageController extends Controller
 
             if (!$messageReference->getSnapshot()->exists()) {
                 $messageReference->set([]);
+            }
+
+            if (in_array($type, ['agent', 'dmc'], true)) {
+                $emailToStore = $type === 'agent'
+                    ? $this->resolveAgentEmailForChatroom($userId)
+                    : (string) ($validated['dmc_email'] ?? '');
+
+                if ($emailToStore === '') {
+                    return response()->json([
+                        'success' => false,
+                        'message' => $type === 'agent'
+                            ? 'Agent email not found for the provided id.'
+                            : 'dmc_email is required and must be a valid email for type dmc.',
+                    ], 422);
+                }
+
+                $this->appendEmailToChatroomEmails($database, $tourId, $emailToStore);
             }
 
             return response()->json([
@@ -364,6 +388,54 @@ class MessageController extends Controller
         }
 
         return (int) $tour->agent_id === $id;
+    }
+
+    private function resolveAgentEmailForChatroom(int $agentId): string
+    {
+        $agent = Agent::query()
+            ->where('agent_id', $agentId)
+            ->first();
+
+        if (!$agent) {
+            return '';
+        }
+
+        $email = $agent->email ?? null;
+
+        return is_string($email) ? trim($email) : '';
+    }
+
+    private function appendEmailToChatroomEmails(Database $database, int $tourId, string $email): void
+    {
+        $email = trim($email);
+        if ($email === '') {
+            return;
+        }
+
+        $ref = $database->getReference('chat/' . $tourId . '/emails');
+        $raw = $ref->getSnapshot()->getValue();
+        $list = [];
+
+        if (is_array($raw)) {
+            foreach ($raw as $v) {
+                if (is_string($v)) {
+                    $v = trim($v);
+                    if ($v !== '') {
+                        $list[] = $v;
+                    }
+                }
+            }
+        }
+
+        $normalizedNew = strtolower($email);
+        foreach ($list as $existing) {
+            if (strtolower($existing) === $normalizedNew) {
+                return;
+            }
+        }
+
+        $list[] = $email;
+        $ref->set($list);
     }
 
     private function buildTourChatroomPayload(Tour $tour): array
