@@ -5,6 +5,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\MessageController;
 use App\Http\Controllers\NotificationController;
+use App\Http\Controllers\LostFoundController;
 use App\Http\Controllers\RestaurantController;
 
 Route::prefix('app/v1')->group(function () {
@@ -50,6 +51,8 @@ Route::prefix('app/v1')->group(function () {
         Route::post('/share-contact-status', [AuthController::class, 'shareContactStatusUpdate']);
         Route::post('/chatrooms', [MessageController::class, 'getChatrooms']);
         Route::post('/send-message', [MessageController::class, 'sendMessage']);
+        Route::get('/lost-found', [LostFoundController::class, 'index']);
+        Route::post('/lost-found', [LostFoundController::class, 'store']);
         Route::get('/upcoming-tours', [AuthController::class, 'upcomingTours']);
         
         Route::get('/user', function (Request $request) {

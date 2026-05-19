@@ -1478,13 +1478,13 @@ class AuthController extends Controller
     public function logout(Request $request)
     {
         try {
-            $userType = $request->input('user_type');
+            $userType = strtolower((string) $request->input('user_type'));
             
             // Validate user type
-            if (!$userType || !in_array($userType, ['driver', 'guide', 'guest', 'restaurant'])) {
+            if ($userType === '' || !in_array($userType, ['driver', 'guide', 'guest', 'restaurant', 'agent', 'dmc'], true)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Valid user_type is required (driver, guide, guest, or restaurant)',
+                    'message' => 'Valid user_type is required (driver, guide, guest, restaurant, agent, or dmc)',
                 ], 400);
             }
 
@@ -1587,6 +1587,10 @@ class AuthController extends Controller
                 return 'guest';
             case 'Restaurant':
                 return 'restaurant';
+            case 'Agent':
+                return 'agent';
+            case 'User':
+                return 'dmc';
             default:
                 return 'user';
         }
