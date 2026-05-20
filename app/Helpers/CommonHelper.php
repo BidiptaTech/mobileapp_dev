@@ -16,12 +16,14 @@ class CommonHelper
      * @param string $name Setting name for storage type (e.g., 'file_storage')
      * @param \Illuminate\Http\UploadedFile $logoFile The uploaded file
      * @param string $container Container/folder name for Azure (default: 'uploads')
+     * @param string|null $fileName Optional blob/file name (use for multi-upload batches)
      * @return array Contains 'master_value' key with the image URL
      */
-    public static function image_path($name, $logoFile, $container = 'uploads')
+    public static function image_path($name, $logoFile, $container = 'uploads', ?string $fileName = null)
     {
         $get_filestorage = Setting::where('name', $name)->where('status', 1)->first();
-        $logoName = 'logo_' . time() . '_' . Str::random(6) . '.' . $logoFile->getClientOriginalExtension();
+        $extension = $logoFile->getClientOriginalExtension() ?: 'jpg';
+        $logoName = $fileName ?? ('logo_' . time() . '_' . Str::random(6) . '.' . $extension);
         
         if ($get_filestorage) {
             try {
