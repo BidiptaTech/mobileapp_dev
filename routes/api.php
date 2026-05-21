@@ -51,6 +51,7 @@ Route::prefix('app/v1')->group(function () {
         Route::post('/share-contact-status', [AuthController::class, 'shareContactStatusUpdate']);
         Route::post('/chatrooms', [MessageController::class, 'getChatrooms']);
         Route::post('/send-message', [MessageController::class, 'sendMessage']);
+        Route::post('/send-chatroom-notification', [NotificationController::class, 'sendChatroomNotification']);
         Route::get('/lost-found', [LostFoundController::class, 'index']);
         Route::post('/lost-found', [LostFoundController::class, 'store']);
         Route::get('/upcoming-tours', [AuthController::class, 'upcomingTours']);
