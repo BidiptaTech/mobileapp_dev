@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Driver;
+use App\Models\Guide;
 use Illuminate\Http\Request;
 use Kreait\Firebase\Contract\Database;
 use Kreait\Firebase\Contract\Messaging;
@@ -105,14 +107,22 @@ class NotificationController extends Controller
 
             $chatRoom = $chatSnapshot->getValue() ?? [];
             $recipientEmails = $this->extractChatroomRecipientEmails($chatRoom, $senderEmail);
+            $excludedDriverGuideEmails = [];
+
+            if ($this->isEmergencyNotificationTitle($validated['title'] ?? null)) {
+                [$recipientEmails, $excludedDriverGuideEmails] = $this->excludeDriverAndGuideEmails($recipientEmails);
+            }
 
             if ($recipientEmails === []) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'No recipient emails found in the chat room (excluding sender).',
+                    'message' => $excludedDriverGuideEmails !== []
+                        ? 'No recipients remain after excluding drivers and guides for Emergency notifications.'
+                        : 'No recipient emails found in the chat room (excluding sender).',
                     'data' => [
                         'chatroom_id' => $chatId,
                         'sender_email' => $senderEmail,
+                        'excluded_driver_guide_emails' => $excludedDriverGuideEmails,
                     ],
                 ], 404);
             }
@@ -189,6 +199,7 @@ class NotificationController extends Controller
                     'chatroom_id' => $chatId,
                     'sender_email' => $senderEmail,
                     'recipient_emails' => $recipientEmails,
+                    'excluded_driver_guide_emails' => $excludedDriverGuideEmails,
                     'devices_targeted' => count($devices),
                     'success_count' => $totalSuccess,
                     'failure_count' => $totalFailure,
@@ -222,6 +233,57 @@ class NotificationController extends Controller
     private function encodeEmailForTokens(string $email): string
     {
         return base64_encode(strtolower(trim($email)));
+    }
+
+    private function isEmergencyNotificationTitle(?string $title): bool
+    {
+        return strcasecmp(trim((string) $title), 'Emergency') === 0;
+    }
+
+    /**
+     * For Emergency alerts: skip recipients whose email exists on drivers or guides tables.
+     *
+     * @param  array<int, string>  $recipientEmails
+     * @return array{0: array<int, string>, 1: array<int, string>}
+     */
+    private function excludeDriverAndGuideEmails(array $recipientEmails): array
+    {
+        if ($recipientEmails === []) {
+            return [[], []];
+        }
+
+        $normalizedRecipients = [];
+        foreach ($recipientEmails as $email) {
+            $normalizedRecipients[strtolower(trim($email))] = $email;
+        }
+
+        $normalizedList = array_keys($normalizedRecipients);
+
+        $driverEmails = Driver::query()
+            ->whereNotNull('email')
+            ->whereRaw('LOWER(TRIM(email)) IN (' . implode(',', array_fill(0, count($normalizedList), '?')) . ')', $normalizedList)
+            ->pluck('email')
+            ->map(fn ($email) => strtolower(trim((string) $email)))
+            ->all();
+
+        $guideEmails = Guide::query()
+            ->whereNotNull('email')
+            ->whereRaw('LOWER(TRIM(email)) IN (' . implode(',', array_fill(0, count($normalizedList), '?')) . ')', $normalizedList)
+            ->pluck('email')
+            ->map(fn ($email) => strtolower(trim((string) $email)))
+            ->all();
+
+        $excludedNormalized = array_values(array_unique(array_merge($driverEmails, $guideEmails)));
+        $excludedOriginal = [];
+
+        foreach ($excludedNormalized as $normalized) {
+            if (isset($normalizedRecipients[$normalized])) {
+                $excludedOriginal[] = $normalizedRecipients[$normalized];
+                unset($normalizedRecipients[$normalized]);
+            }
+        }
+
+        return [array_values($normalizedRecipients), $excludedOriginal];
     }
 
     /**
