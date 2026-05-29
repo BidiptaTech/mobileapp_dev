@@ -172,8 +172,11 @@ class MessageController extends Controller
         }
 
         try {
+            $requestedDate = $request->filled('date')
+                ? date('Y-m-d', strtotime((string) $validated['date']))
+                : null;
             $datesToCheck = $request->filled('date')
-                ? [date('Y-m-d', strtotime((string) $validated['date']))]
+                ? [$requestedDate]
                 : [now()->toDateString(), now()->addDay()->toDateString()];
 
             if (in_array($role, ['agent', 'dmc'], true)) {
@@ -198,11 +201,28 @@ class MessageController extends Controller
                         'tour_status',
                         'mainguest',
                     ])
-                    ->whereIn('tour_status', ['Confirmed', 'Definite', 'Actual'])
-                    ->where(function ($query) use ($datesToCheck) {
-                        $query->whereIn('check_in_time', $datesToCheck)
-                            ->orWhereIn('check_out_time', $datesToCheck);
+                    ->whereIn('tour_status', ['Confirmed', 'Definite', 'Actual']);
+
+                if ($requestedDate !== null) {
+                    // If date is provided for agent/dmc: match only check_in_time.
+                    $toursQuery->whereDate('check_in_time', $requestedDate);
+                } else {
+                    // Default for agent/dmc: include tours active on today or tomorrow.
+                    $toursQuery->where(function ($outerQuery) use ($datesToCheck) {
+                        foreach ($datesToCheck as $dateToCheck) {
+                            $outerQuery->orWhere(function ($activeOnDateQuery) use ($dateToCheck) {
+                                $activeOnDateQuery->whereDate('check_in_time', '<=', $dateToCheck)
+                                    ->where(function ($checkOutQuery) use ($dateToCheck) {
+                                        $checkOutQuery->whereDate('check_out_time', '>=', $dateToCheck)
+                                            ->orWhere(function ($nullCheckOutQuery) use ($dateToCheck) {
+                                                $nullCheckOutQuery->whereNull('check_out_time')
+                                                    ->whereDate('check_in_time', $dateToCheck);
+                                            });
+                                    });
+                            });
+                        }
                     });
+                }
 
                 if ($role === 'agent') {
                     $toursQuery->where('agent_id', $requestedId);

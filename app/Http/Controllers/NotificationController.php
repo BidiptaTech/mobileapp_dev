@@ -7,6 +7,8 @@ use App\Models\Guide;
 use Illuminate\Http\Request;
 use Kreait\Firebase\Contract\Database;
 use Kreait\Firebase\Contract\Messaging;
+use Kreait\Firebase\Messaging\AndroidConfig;
+use Kreait\Firebase\Messaging\ApnsConfig;
 use Kreait\Firebase\Messaging\CloudMessage;
 use Kreait\Firebase\Messaging\Notification as FcmNotification;
 
@@ -148,6 +150,7 @@ class NotificationController extends Controller
 
             $title = $validated['title'] ?? 'New message';
             $body = $validated['body'] ?? 'You have a new message in the chat';
+            $isEmergency = $this->isEmergencyNotificationTitle($title);
             $notification = FcmNotification::create($title, $body, null);
             $message = CloudMessage::new()->withNotification($notification);
 
@@ -160,6 +163,10 @@ class NotificationController extends Controller
                 $validated['data'] ?? []
             ));
             $message = $message->withData($data);
+
+            if ($isEmergency) {
+                $message = $this->applyEmergencyAlertConfig($message);
+            }
 
             $totalSuccess = 0;
             $totalFailure = 0;
@@ -200,6 +207,7 @@ class NotificationController extends Controller
                     'sender_email' => $senderEmail,
                     'recipient_emails' => $recipientEmails,
                     'excluded_driver_guide_emails' => $excludedDriverGuideEmails,
+                    'is_emergency' => $isEmergency,
                     'devices_targeted' => count($devices),
                     'success_count' => $totalSuccess,
                     'failure_count' => $totalFailure,
@@ -428,5 +436,35 @@ class NotificationController extends Controller
                 $database->getReference('user_tokens/' . $encodedEmail . '/' . $childKey)->remove();
             }
         }
+    }
+
+    private function applyEmergencyAlertConfig(CloudMessage $message): CloudMessage
+    {
+        $androidConfig = AndroidConfig::fromArray([
+            'priority' => 'high',
+            'notification' => [
+                'sound' => 'emergency_alert',
+                'channel_id' => 'emergency_alerts',
+                'color' => '#FF0000',
+                'priority' => 'max',
+                'default_sound' => false,
+            ],
+        ]);
+
+        $apnsConfig = ApnsConfig::fromArray([
+            'headers' => [
+                'apns-priority' => '10',
+            ],
+            'payload' => [
+                'aps' => [
+                    'sound' => 'emergency_alert.caf',
+                    'badge' => 1,
+                ],
+            ],
+        ]);
+
+        return $message
+            ->withAndroidConfig($androidConfig)
+            ->withApnsConfig($apnsConfig);
     }
 }
