@@ -311,8 +311,28 @@ class AuthController extends Controller
             $dmc_id = null;
             foreach($tourIds as $tourId){
                 $firstOrder = Order::select('data')->where('tour_id', $tourId)->first();
-                
-                $orderData = is_string($firstOrder->data) ? json_decode($firstOrder->data, true) : $firstOrder->data;
+                $orderData = $firstOrder && $firstOrder->data
+                    ? (is_string($firstOrder->data) ? json_decode($firstOrder->data, true) : $firstOrder->data)
+                    : null;
+                // Only use airport fields from this driver's own today jobsheets (not other drivers on same tour)
+                $entryPortFields = $this->nullArrivalFields();
+                $exitPortFields = $this->nullDepartureFields();
+
+                $driverEntryPortJobsheet = $jobsheets->first(function ($jobsheet) use ($tourId) {
+                    return (int) $jobsheet->tour_id === (int) $tourId
+                        && strtolower((string) $jobsheet->type) === 'entry_port';
+                });
+                if ($driverEntryPortJobsheet) {
+                    $entryPortFields = $this->getEntryPortArrivalFieldsFromBookingId($driverEntryPortJobsheet->order_id);
+                }
+
+                $driverExitPortJobsheet = $jobsheets->first(function ($jobsheet) use ($tourId) {
+                    return (int) $jobsheet->tour_id === (int) $tourId
+                        && strtolower((string) $jobsheet->type) === 'exit_port';
+                });
+                if ($driverExitPortJobsheet) {
+                    $exitPortFields = $this->getExitPortDepartureFieldsFromBookingId($driverExitPortJobsheet->order_id);
+                }
                 
                 if($orderData && isset($orderData[0])){
                     $share_status = null; // default
@@ -340,13 +360,30 @@ class AuthController extends Controller
                         'address' => $orderData[0]['address1'] ?? '',
                         'state' => $orderData[0]['state'] ?? '',
                         'zip' => $orderData[0]['zip'] ?? '',
-                        'whatsapp_no' => $guest_whatsapp_no ?? ''
+                        'whatsapp_no' => $guest_whatsapp_no ?? '',
+                        'arrival_transport_type' => $entryPortFields['arrival_transport_type'],
+                        'arrival_flight_no' => $entryPortFields['arrival_flight_no'],
+                        'departure_transport_type' => $exitPortFields['departure_transport_type'],
+                        'departure_flight_no' => $exitPortFields['departure_flight_no'],
                     ];
                     
                     $dmc_id = $orderData[0]['dmc_id'] ?? $orderData[0]['dmc_Id'] ?? $orderData[0]['priceModeId'] ?? $orderData[0]['dmcId'] ?? null;
                 }
                 else{
-                    $customer_info[$tourId] = null;
+                    $customer_info[$tourId] = [
+                        'name' => null,
+                        'email' => null,
+                        'isContactShared' => null,
+                        'phone' => null,
+                        'address' => null,
+                        'state' => null,
+                        'zip' => null,
+                        'whatsapp_no' => null,
+                        'arrival_transport_type' => $entryPortFields['arrival_transport_type'],
+                        'arrival_flight_no' => $entryPortFields['arrival_flight_no'],
+                        'departure_transport_type' => $exitPortFields['departure_transport_type'],
+                        'departure_flight_no' => $exitPortFields['departure_flight_no'],
+                    ];
                 }
             }
             
@@ -443,9 +480,16 @@ class AuthController extends Controller
             $customer_info = [];
             foreach($tourIds as $tourId){
                 $firstOrder = Order::select('data')->where('tour_id', $tourId)->first();
-                $orderData = is_string($firstOrder->data) ? json_decode($firstOrder->data, true) : $firstOrder->data;
+                $orderData = $firstOrder && $firstOrder->data
+                    ? (is_string($firstOrder->data) ? json_decode($firstOrder->data, true) : $firstOrder->data)
+                    : null;
+
+                // entry_port jobsheets are usually assigned to drivers, not guides — look up by tour + date
+                $entryPortFields = $this->getEntryPortArrivalFieldsForTourFromJobsheet($tourId);
+
                 if($orderData && isset($orderData[0])){
                     $share_status = null; // default
+                    $guest_whatsapp_no = null;
 
                     if (!empty($orderData[0]['email'])) {
                         $guest = Guest::whereJsonContains('tour_id', $tourId)
@@ -463,11 +507,24 @@ class AuthController extends Controller
                         'address' => $orderData[0]['address1'],
                         'state' => $orderData[0]['state'],
                         'zip' => $orderData[0]['zip'],
-                        'whatsapp_no' => $guest_whatsapp_no ?? ''
+                        'whatsapp_no' => $guest_whatsapp_no ?? '',
+                        'arrival_transport_type' => $entryPortFields['arrival_transport_type'],
+                        'arrival_flight_no' => $entryPortFields['arrival_flight_no'],
                     ];
                 }
                 else{
-                    $customer_info[$tourId] = null;
+                    $customer_info[$tourId] = [
+                        'name' => null,
+                        'email' => null,
+                        'isContactShared' => null,
+                        'phone' => null,
+                        'address' => null,
+                        'state' => null,
+                        'zip' => null,
+                        'whatsapp_no' => null,
+                        'arrival_transport_type' => $entryPortFields['arrival_transport_type'],
+                        'arrival_flight_no' => $entryPortFields['arrival_flight_no'],
+                    ];
                 }
             }
 
@@ -802,9 +859,10 @@ class AuthController extends Controller
             }
             
             $tours = $toursQuery->get();
+            $includeAirportDetails = in_array($status_type, ['ongoing', 'upcoming'], true);
             
             // Map over tours and get all orders for each tour
-            $toursWithOrders = $tours->map(function ($tour) {
+            $toursWithOrders = $tours->map(function ($tour) use ($includeAirportDetails) {
                 // Get all orders for this tour (without the tour relationship to avoid duplication)
                 $agentId = $tour->agent_id;
                 $agent = Agent::select('agency_id')
@@ -1024,6 +1082,31 @@ class AuthController extends Controller
                 $tourData['agency_phone'] = $agency->phone;
                 $tourData['agency_email'] = $agency->email;
                 $tourData['agency_wp_number'] = $agency->wp_number;
+
+                if ($includeAirportDetails) {
+                    $tourData['Entry_Airport'] = [];
+                    $tourData['Exit_Airport'] = [];
+
+                    foreach ($orders as $order) {
+                        $orderData = is_array($order->data) ? $order->data : json_decode($order->data, true);
+                        $dataRow = (is_array($orderData) && isset($orderData[0])) ? $orderData[0] : null;
+
+                        if ($order->type === 'entry_port') {
+                            $tourData['Entry_Airport'][] = [
+                                'arrival_transport_type' => $dataRow !== null ? ($dataRow['arrival_transport_type'] ?? null) : null,
+                                'arrival_flight_no' => $dataRow !== null ? ($dataRow['arrival_flight_no'] ?? null) : null,
+                            ];
+                        }
+
+                        if ($order->type === 'exit_port') {
+                            $tourData['Exit_Airport'][] = [
+                                'departure_transport_type' => $dataRow !== null ? ($dataRow['departure_transport_type'] ?? null) : null,
+                                'departure_flight_no' => $dataRow !== null ? ($dataRow['departure_flight_no'] ?? null) : null,
+                            ];
+                        }
+                    }
+                }
+
                 return $tourData;
             });
             
@@ -1929,5 +2012,212 @@ class AuthController extends Controller
                 ], 500);
             }
         }
+    }
+
+    /**
+     * @return array{arrival_transport_type: mixed, arrival_flight_no: mixed}
+     */
+    private function getEntryPortArrivalFieldsForTour(int|string $tourId): array
+    {
+        $order = Order::query()
+            ->select('data')
+            ->where('tour_id', $tourId)
+            ->whereRaw('LOWER(type) = ?', ['entry_port'])
+            ->first();
+
+        return $this->extractEntryPortArrivalFieldsFromOrderData($order?->data);
+    }
+
+    /**
+     * Resolve entry_port arrival fields via today's jobsheet order_id → orders.booking_id.
+     *
+     * @return array{arrival_transport_type: mixed, arrival_flight_no: mixed}
+     */
+    private function getEntryPortArrivalFieldsForTourFromJobsheet(int|string $tourId, ?string $date = null): array
+    {
+        $date = $date ?? today()->toDateString();
+
+        $entryPortJobsheet = Jobsheet::query()
+            ->select('order_id')
+            ->where('tour_id', $tourId)
+            ->whereDate('date', $date)
+            ->whereRaw('LOWER(type) = ?', ['entry_port'])
+            ->whereNotNull('order_id')
+            ->first();
+
+        if ($entryPortJobsheet) {
+            $fields = $this->getEntryPortArrivalFieldsFromBookingId($entryPortJobsheet->order_id);
+            if ($fields['arrival_transport_type'] !== null || $fields['arrival_flight_no'] !== null) {
+                return $fields;
+            }
+        }
+
+        return $this->getEntryPortArrivalFieldsForTour($tourId);
+    }
+
+    /**
+     * @return array{arrival_transport_type: null, arrival_flight_no: null}
+     */
+    private function nullArrivalFields(): array
+    {
+        return [
+            'arrival_transport_type' => null,
+            'arrival_flight_no' => null,
+        ];
+    }
+
+    /**
+     * @return array{departure_transport_type: null, departure_flight_no: null}
+     */
+    private function nullDepartureFields(): array
+    {
+        return [
+            'departure_transport_type' => null,
+            'departure_flight_no' => null,
+        ];
+    }
+
+    /**
+     * @return array{arrival_transport_type: mixed, arrival_flight_no: mixed}
+     */
+    private function getEntryPortArrivalFieldsFromBookingId(mixed $bookingId): array
+    {
+        if ($bookingId === null || $bookingId === '') {
+            return [
+                'arrival_transport_type' => null,
+                'arrival_flight_no' => null,
+            ];
+        }
+
+        $order = $this->findOrderByBookingId($bookingId);
+
+        return $this->extractEntryPortArrivalFieldsFromOrderData($order?->data);
+    }
+
+    private function findOrderByBookingId(mixed $bookingId): ?Order
+    {
+        $candidates = array_values(array_unique(array_filter([
+            $bookingId,
+            is_scalar($bookingId) ? (string) $bookingId : null,
+            is_numeric($bookingId) ? (int) $bookingId : null,
+        ], fn ($value) => $value !== null && $value !== '')));
+
+        return Order::query()
+            ->select('data')
+            ->whereIn('booking_id', $candidates)
+            ->first();
+    }
+
+    /**
+     * @return array{arrival_transport_type: mixed, arrival_flight_no: mixed}
+     */
+    private function extractEntryPortArrivalFieldsFromOrderData(mixed $orderData): array
+    {
+        $dataRow = $this->decodeOrderDataFirstRow($orderData);
+
+        return [
+            'arrival_transport_type' => $dataRow !== null ? ($dataRow['arrival_transport_type'] ?? null) : null,
+            'arrival_flight_no' => $dataRow !== null ? ($dataRow['arrival_flight_no'] ?? null) : null,
+        ];
+    }
+
+    /**
+     * @return array{departure_transport_type: mixed, departure_flight_no: mixed}
+     */
+    private function getExitPortDepartureFieldsForTour(int|string $tourId): array
+    {
+        $order = Order::query()
+            ->select('data')
+            ->where('tour_id', $tourId)
+            ->whereRaw('LOWER(type) = ?', ['exit_port'])
+            ->first();
+
+        return $this->extractExitPortDepartureFieldsFromOrderData($order?->data);
+    }
+
+    /**
+     * @return array{departure_transport_type: mixed, departure_flight_no: mixed}
+     */
+    private function getExitPortDepartureFieldsForTourFromJobsheet(int|string $tourId, ?string $date = null): array
+    {
+        $date = $date ?? today()->toDateString();
+
+        $exitPortJobsheet = Jobsheet::query()
+            ->select('order_id')
+            ->where('tour_id', $tourId)
+            ->whereDate('date', $date)
+            ->whereRaw('LOWER(type) = ?', ['exit_port'])
+            ->whereNotNull('order_id')
+            ->first();
+
+        if ($exitPortJobsheet) {
+            $fields = $this->getExitPortDepartureFieldsFromBookingId($exitPortJobsheet->order_id);
+            if ($fields['departure_transport_type'] !== null || $fields['departure_flight_no'] !== null) {
+                return $fields;
+            }
+        }
+
+        return $this->getExitPortDepartureFieldsForTour($tourId);
+    }
+
+    /**
+     * @return array{departure_transport_type: mixed, departure_flight_no: mixed}
+     */
+    private function getExitPortDepartureFieldsFromBookingId(mixed $bookingId): array
+    {
+        if ($bookingId === null || $bookingId === '') {
+            return [
+                'departure_transport_type' => null,
+                'departure_flight_no' => null,
+            ];
+        }
+
+        $order = $this->findOrderByBookingId($bookingId);
+
+        return $this->extractExitPortDepartureFieldsFromOrderData($order?->data);
+    }
+
+    /**
+     * @return array{departure_transport_type: mixed, departure_flight_no: mixed}
+     */
+    private function extractExitPortDepartureFieldsFromOrderData(mixed $orderData): array
+    {
+        $dataRow = $this->decodeOrderDataFirstRow($orderData);
+
+        return [
+            'departure_transport_type' => $dataRow !== null ? ($dataRow['departure_transport_type'] ?? null) : null,
+            'departure_flight_no' => $dataRow !== null ? ($dataRow['departure_flight_no'] ?? null) : null,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function decodeOrderDataFirstRow(mixed $orderData): ?array
+    {
+        if ($orderData === null) {
+            return null;
+        }
+
+        $decoded = is_string($orderData) ? json_decode($orderData, true) : $orderData;
+
+        if (!is_array($decoded)) {
+            return null;
+        }
+
+        if (isset($decoded[0]) && is_array($decoded[0])) {
+            return $decoded[0];
+        }
+
+        if (
+            array_key_exists('arrival_transport_type', $decoded)
+            || array_key_exists('arrival_flight_no', $decoded)
+            || array_key_exists('departure_transport_type', $decoded)
+            || array_key_exists('departure_flight_no', $decoded)
+        ) {
+            return $decoded;
+        }
+
+        return null;
     }
 }
