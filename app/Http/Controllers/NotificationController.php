@@ -51,16 +51,17 @@ class NotificationController extends Controller
             $report = $messaging->sendMulticast($message, $tokens);
 
             $failedIndices = [];
-            foreach ($report->failures() as $index => $failure) {
+            foreach ($report->failures()->getItems() as $failure) {
                 $error = $failure->error();
+                $badToken = $failure->target()->value();
                 $failedIndices[] = [
-                    'index' => $index,
+                    'token' => $badToken,
                     'error' => $error ? $error->getMessage() : 'unknown',
                 ];
 
                 $errorMsg = $error ? $error->getMessage() : '';
                 if (stripos($errorMsg, 'NotRegistered') !== false || stripos($errorMsg, 'InvalidRegistration') !== false) {
-                    $this->removeInvalidToken($database, $encodedEmail, $tokens[$index] ?? null);
+                    $this->removeInvalidToken($database, $encodedEmail, $badToken);
                 }
             }
 
@@ -172,23 +173,24 @@ class NotificationController extends Controller
             $totalFailure = 0;
             $failures = [];
 
-            foreach (array_chunk($tokens, 500) as $batchIndex => $tokenBatch) {
+            foreach (array_chunk($tokens, 500) as $tokenBatch) {
                 $report = $messaging->sendMulticast($message, $tokenBatch);
                 $totalSuccess += $report->successes()->count();
                 $totalFailure += $report->failures()->count();
 
-                foreach ($report->failures() as $index => $failure) {
+                // failures() returns MulticastSendReport (Countable only) — iterate getItems().
+                foreach ($report->failures()->getItems() as $failure) {
                     $error = $failure->error();
+                    $badToken = $failure->target()->value();
                     $failures[] = [
-                        'token_index' => ($batchIndex * 500) + $index,
+                        'token' => $badToken,
                         'error' => $error ? $error->getMessage() : 'unknown',
                     ];
 
                     $errorMsg = $error ? $error->getMessage() : '';
                     if (stripos($errorMsg, 'NotRegistered') !== false || stripos($errorMsg, 'InvalidRegistration') !== false) {
-                        $badToken = $tokenBatch[$index] ?? null;
-                        $device = $badToken ? ($tokenToDevice[$badToken] ?? null) : null;
-                        if ($device && $badToken) {
+                        $device = $tokenToDevice[$badToken] ?? null;
+                        if ($device) {
                             $this->removeInvalidToken(
                                 $database,
                                 $this->encodeEmailForTokens($device['email']),
@@ -446,7 +448,7 @@ class NotificationController extends Controller
                 'sound' => 'emergency_alert',
                 'channel_id' => 'emergency_alerts',
                 'color' => '#FF0000',
-                'priority' => 'max',
+                'notification_priority' => 'PRIORITY_MAX',
                 'default_sound' => false,
             ],
         ]);
@@ -454,6 +456,7 @@ class NotificationController extends Controller
         $apnsConfig = ApnsConfig::fromArray([
             'headers' => [
                 'apns-priority' => '10',
+                'apns-push-type' => 'alert',
             ],
             'payload' => [
                 'aps' => [
