@@ -352,7 +352,7 @@ class AuthController extends Controller
                         $guest_whatsapp_no = $guest?->whatsapp_no;
                     }
                     
-                    $customer_info[$tourId] = [
+                    $customerInfo = [
                         'name' => $guest?->guest_name ?? $orderData[0]['fullName'] ?? '',
                         'email' => $guest?->email ?? $orderData[0]['email'] ?? '',
                         'isContactShared' => $share_status,
@@ -361,16 +361,24 @@ class AuthController extends Controller
                         'state' => $orderData[0]['state'] ?? '',
                         'zip' => $orderData[0]['zip'] ?? '',
                         'whatsapp_no' => $guest_whatsapp_no ?? '',
-                        'arrival_transport_type' => $entryPortFields['arrival_transport_type'],
-                        'arrival_flight_no' => $entryPortFields['arrival_flight_no'],
-                        'departure_transport_type' => $exitPortFields['departure_transport_type'],
-                        'departure_flight_no' => $exitPortFields['departure_flight_no'],
                     ];
+
+                    if ($driverEntryPortJobsheet) {
+                        $customerInfo['arrival_transport_type'] = $entryPortFields['arrival_transport_type'];
+                        $customerInfo['arrival_flight_no'] = $entryPortFields['arrival_flight_no'];
+                    }
+
+                    if ($driverExitPortJobsheet) {
+                        $customerInfo['departure_transport_type'] = $exitPortFields['departure_transport_type'];
+                        $customerInfo['departure_flight_no'] = $exitPortFields['departure_flight_no'];
+                    }
+
+                    $customer_info[$tourId] = $customerInfo;
                     
                     $dmc_id = $orderData[0]['dmc_id'] ?? $orderData[0]['dmc_Id'] ?? $orderData[0]['priceModeId'] ?? $orderData[0]['dmcId'] ?? null;
                 }
                 else{
-                    $customer_info[$tourId] = [
+                    $customerInfo = [
                         'name' => null,
                         'email' => null,
                         'isContactShared' => null,
@@ -379,11 +387,19 @@ class AuthController extends Controller
                         'state' => null,
                         'zip' => null,
                         'whatsapp_no' => null,
-                        'arrival_transport_type' => $entryPortFields['arrival_transport_type'],
-                        'arrival_flight_no' => $entryPortFields['arrival_flight_no'],
-                        'departure_transport_type' => $exitPortFields['departure_transport_type'],
-                        'departure_flight_no' => $exitPortFields['departure_flight_no'],
                     ];
+
+                    if ($driverEntryPortJobsheet) {
+                        $customerInfo['arrival_transport_type'] = $entryPortFields['arrival_transport_type'];
+                        $customerInfo['arrival_flight_no'] = $entryPortFields['arrival_flight_no'];
+                    }
+
+                    if ($driverExitPortJobsheet) {
+                        $customerInfo['departure_transport_type'] = $exitPortFields['departure_transport_type'];
+                        $customerInfo['departure_flight_no'] = $exitPortFields['departure_flight_no'];
+                    }
+
+                    $customer_info[$tourId] = $customerInfo;
                 }
             }
             
@@ -868,8 +884,40 @@ class AuthController extends Controller
                 $agent = Agent::select('agency_id')
                     ->where('agent_id', $agentId)
                     ->first();
-                $agency = Agency::select('agency_name', 'phone', 'email', 'wp_number')
-                    ->where('agency_id', $agent->agency_id)
+                $agency = null;
+                if ($agent && $agent->agency_id) {
+                    $agency = Agency::select([
+                        'agency_name',
+                        'email',
+                        'phone',
+                        'country',
+                        'city',
+                        'address',
+                        'postal_code',
+                        'branches',
+                        'contact_person',
+                        'logo',
+                        'wp_number',
+                    ])
+                        ->where('agency_id', $agent->agency_id)
+                        ->first();
+                }
+
+                $dmc = User::select([
+                    'name',
+                    'email',
+                    'country_code',
+                    'phone',
+                    'salutation',
+                    'country',
+                    'company_name',
+                    'city',
+                    'address',
+                    'user_country',
+                    'profile_image',
+                ])
+                    ->where('dmcId', $tour->dmc_id)
+                    ->where('role_id', 11)
                     ->first();
                 
                 $orders = Order::select([
@@ -1078,10 +1126,36 @@ class AuthController extends Controller
                 $tourData = $tour->toArray();
                 $tourData['orders'] = $orders;
                 $tourData['total_orders'] = $orders->count();
-                $tourData['agency_name'] = $agency->agency_name;
-                $tourData['agency_phone'] = $agency->phone;
-                $tourData['agency_email'] = $agency->email;
-                $tourData['agency_wp_number'] = $agency->wp_number;
+                $tourData['agency_name'] = $agency->agency_name ?? null;
+                $tourData['agency_phone'] = $agency->phone ?? null;
+                $tourData['agency_email'] = $agency->email ?? null;
+                $tourData['agency_wp_number'] = $agency->wp_number ?? null;
+                $tourData['agency_data'] = [
+                    'agency_name' => $agency->agency_name ?? null,
+                    'email' => $agency->email ?? null,
+                    'phone' => $agency->phone ?? null,
+                    'country' => $agency->country ?? null,
+                    'city' => $agency->city ?? null,
+                    'address' => $agency->address ?? null,
+                    'postal_code' => $agency->postal_code ?? null,
+                    'branches' => $agency->branches ?? null,
+                    'contact_person' => $agency->contact_person ?? null,
+                    'logo' => $agency->logo ?? null,
+                    'wp_number' => $agency->wp_number ?? null,
+                ];
+                $tourData['dmc_data'] = [
+                    'name' => $dmc->name ?? null,
+                    'email' => $dmc->email ?? null,
+                    'country_code' => $dmc->country_code ?? null,
+                    'phone' => $dmc->phone ?? null,
+                    'salutation' => $dmc->salutation ?? null,
+                    'country' => $dmc->country ?? null,
+                    'company_name' => $dmc->company_name ?? null,
+                    'city' => $dmc->city ?? null,
+                    'address' => $dmc->address ?? null,
+                    'user_country' => $dmc->user_country ?? null,
+                    'profile_image' => $dmc->profile_image ?? null,
+                ];
 
                 if ($includeAirportDetails) {
                     $tourData['Entry_Airport'] = [];
