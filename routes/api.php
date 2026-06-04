@@ -3,6 +3,7 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\GuestController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\RestaurantController;
 
@@ -27,6 +28,7 @@ Route::prefix('app/v1')->group(function () {
         // Guest routes
         Route::middleware('is.guest')->group(function () {
             Route::post('/update-guest', [AuthController::class, 'updateGuest']);
+            Route::post('/save-guest-profile', [GuestController::class, 'saveGuestProfile']);
             Route::get('/guest-bookings', [AuthController::class, 'getGuestBookings']);
         });
 
