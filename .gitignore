@@ -1,6 +1,7 @@
 .github
 *.log
 .DS_Store
+
 .env
 .env.backup
 .env.production
@@ -20,6 +21,8 @@
 /storage/*.key
 /storage/pail
 /vendor
+# Never commit Firebase / GCP service account JSON (GitHub push protection)
+/storage/app/firebase/*.json
 
 Homestead.json
 Homestead.yaml

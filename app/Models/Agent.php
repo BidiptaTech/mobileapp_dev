@@ -16,6 +16,7 @@ class Agent extends Authenticatable
     use HasFactory;
     use SoftDeletes;
 
+    protected $primaryKey = 'agent_id';
     protected $guarded = []; 
 
     protected $dates = ['deleted_at'];
