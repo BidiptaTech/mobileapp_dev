@@ -14,9 +14,10 @@ class GuestController extends Controller
     public function saveGuestProfile(Request $request)
     {
         try {
-
-            $additionalInfo = $this->requestSection($request, 'additionalInfo');
-            $guestId = $additionalInfo['guestId'] ?? $request->input('guestId');
+            $profile = $this->requestProfile($request);
+            $additionalInfo = $profile['additionalInfo'] ?? [];
+            $guestId = $request->input('guestId')
+                ?? ($additionalInfo['guestId'] ?? null);
 
             if ($guestId === null || $guestId === '') {
                 return response()->json([
@@ -42,15 +43,22 @@ class GuestController extends Controller
 
             $guest = $authGuest;
 
-            $addressDetails = $this->requestSection($request, 'addressDetails');
-            $contactInfo = $this->requestSection($request, 'contactInfo');
-            $emergencyContact = $this->requestSection($request, 'emergencyContact');
-            $fullNameAndGender = $this->requestSection($request, 'fullNameAndGender');
-            $healthInfo = $this->requestSection($request, 'healthInfo');
-            $passportDetails = $this->requestSection($request, 'passportDetails');
-            $paymentAndDocuments = $this->requestSection($request, 'paymentAndDocuments');
-            $preferences = $this->requestSection($request, 'preferences');
-            $travelSlamBook = $this->requestSection($request, 'travelSlamBook');
+            $addressDetails = $profile['addressDetails'] ?? [];
+            $contactInfo = $profile['contactInfo'] ?? [];
+            $emergencyContact = $profile['emergencyContact'] ?? [];
+            $fullNameAndGender = $profile['fullNameAndGender'] ?? [];
+            $healthInfo = $profile['healthInfo'] ?? [];
+            $passportDetails = $profile['passportDetails'] ?? [];
+            $paymentAndDocuments = $profile['paymentAndDocuments'] ?? [];
+            $preferences = $profile['preferences'] ?? [];
+            $travelSlamBook = $profile['travelSlamBook'] ?? [];
+
+            $paymentPassportDetails = $paymentAndDocuments['passportDetails'] ?? [];
+            if (empty($passportDetails) && !empty($paymentPassportDetails)) {
+                $passportDetails = $paymentPassportDetails;
+            }
+
+            $contactEmail = $contactInfo['email'] ?? $request->input('email');
 
             $guest->guest_id2 = (string) $guestId;
             $guest->languages = $additionalInfo['languages'] ?? null;
@@ -64,7 +72,7 @@ class GuestController extends Controller
             $guest->country = $addressDetails['country'] ?? null;
 
             $guest->phone = $contactInfo['phone'] ?? null;
-            $guest->email2 = $contactInfo['email'] ?? null;
+            $guest->email2 = $contactEmail ?: null;
             $guest->country_of_residence = $contactInfo['countryOfResidence'] ?? null;
 
             $guest->name = $emergencyContact['name'] ?? null;
@@ -88,7 +96,9 @@ class GuestController extends Controller
             $guest->passport_issue_date = $this->nullableDate($passportDetails['passportIssueDate'] ?? null);
             $guest->passport_expiry_date = $this->nullableDate($passportDetails['passportExpiryDate'] ?? null);
 
-            $guest->payment_passport_details = $paymentAndDocuments['passportDetails'] ?? null;
+            $guest->payment_passport_details = !empty($paymentPassportDetails)
+                ? $paymentPassportDetails
+                : null;
             $guest->government_approved_id = $paymentAndDocuments['governmentApprovedId'] ?? null;
 
             $guest->seat_preference = $preferences['seatPreference'] ?? null;
@@ -121,8 +131,8 @@ class GuestController extends Controller
             if (!empty($fullNameAndGender['title'])) {
                 $guest->salutation = $fullNameAndGender['title'];
             }
-            if (!empty($contactInfo['email'])) {
-                $guest->email = $contactInfo['email'];
+            if (!empty($contactEmail)) {
+                $guest->email = $contactEmail;
             }
             if (!empty($contactInfo['phone'])) {
                 $guest->contact = $contactInfo['phone'];
@@ -153,10 +163,32 @@ class GuestController extends Controller
     /**
      * @return array<string, mixed>
      */
-    private function requestSection(Request $request, string $key): array
+    private function requestProfile(Request $request): array
     {
-        $value = $request->input($key);
+        $profile = $this->decodePayload($request->input('profile'));
 
+        if (!empty($profile)) {
+            return $profile;
+        }
+
+         
+
+        $flatProfile = [];
+        foreach ($sectionKeys as $key) {
+            $section = $this->decodePayload($request->input($key));
+            if (!empty($section)) {
+                $flatProfile[$key] = $section;
+            }
+        }
+
+        return $flatProfile;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function decodePayload(mixed $value): array
+    {
         if (is_array($value)) {
             return $value;
         }
