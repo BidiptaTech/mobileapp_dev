@@ -65,7 +65,7 @@ class AuthController extends Controller
                 'dmc' => $this->dmcLogin($request),
                 default => response()->json([
                     'success' => false,
-                    'message' => 'Valid type is required (driver, guide, guest, agent, dmc)',
+                    'message' => 'Valid type is required (driver, guide, guest)',
                 ], 400),
             };
 
@@ -588,6 +588,7 @@ class AuthController extends Controller
                 ->where('email', $email)
                 ->orderBy('id', 'desc')
                 ->first();
+
                
             if (!$guest || !Hash::check($password, $guest->app_password)) {
                 return response()->json([
