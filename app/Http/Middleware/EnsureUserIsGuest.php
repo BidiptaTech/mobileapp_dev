@@ -19,11 +19,14 @@ class EnsureUserIsGuest
             ], 401);
         }
 
-        // Since we're using Guest model directly for authentication,
-        // the authenticated user IS the guest
-        $guest = $user;
+        if (!($user instanceof Guest)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized: You are not a guest.',
+            ], 403);
+        }
 
-        $request->merge(['guest' => $guest]);
+        $request->merge(['guest' => $user]);
 
         return $next($request);
     }
