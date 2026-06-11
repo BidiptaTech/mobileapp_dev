@@ -163,7 +163,7 @@ class MessageController extends Controller
                 ], 403);
             }
         } else {
-            if (!$user instanceof User || (int) $user->userId !== $requestedId) {
+            if (!$user instanceof User || (int) $user->dmcId !== $requestedId) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Authenticated user does not match the provided dmc_id.',
@@ -344,7 +344,7 @@ class MessageController extends Controller
             'driver' => $user instanceof Driver && (int) $user->driver_id === $id,
             'guide' => $user instanceof Guide && (int) $user->guide_id === $id,
             'agent' => $user instanceof Agent && (int) $user->agent_id === $id,
-            'dmc' => $user instanceof User && (int) $user->userId === $id,
+            'dmc' => $user instanceof User && (int) $user->dmcId === $id,
             default => false,
         };
     }

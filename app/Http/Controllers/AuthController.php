@@ -1127,10 +1127,6 @@ class AuthController extends Controller
                 $tourData = $tour->toArray();
                 $tourData['orders'] = $orders;
                 $tourData['total_orders'] = $orders->count();
-                $tourData['agency_name'] = $agency->agency_name ?? null;
-                $tourData['agency_phone'] = $agency->phone ?? null;
-                $tourData['agency_email'] = $agency->email ?? null;
-                $tourData['agency_wp_number'] = $agency->wp_number ?? null;
                 $tourData['agency_data'] = [
                     'agency_name' => $agency->agency_name ?? null,
                     'email' => $agency->email ?? null,
