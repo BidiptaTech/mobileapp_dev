@@ -27,6 +27,16 @@ Route::prefix('app/v1')->group(function () {
             Route::get('/guide-jobsheets', [AuthController::class, 'getGuideJobsheets']);
         });
 
+        // Agent routes
+        Route::middleware('is.agent')->group(function () {
+            Route::post('/update-agent', [AuthController::class, 'updateAgent']);
+        });
+
+        // DMC routes
+        Route::middleware('is.dmc')->group(function () {
+            Route::post('/update-dmc', [AuthController::class, 'updateDmc']);
+        });
+
         // Guest routes
         Route::middleware('is.guest')->group(function () {
             Route::post('/update-guest', [AuthController::class, 'updateGuest']);

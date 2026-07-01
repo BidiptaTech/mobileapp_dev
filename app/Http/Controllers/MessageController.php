@@ -237,27 +237,9 @@ class MessageController extends Controller
                     ->unique('tour_id')
                     ->values();
 
-                $database = $this->createFirebaseDatabase();
-                $chatrooms = [];
+                $chatrooms = $this->collectAgentDmcChatrooms($tours);
 
-                foreach ($tours as $tour) {
-                    $chatSnapshot = $database->getReference('chat/' . $tour->tour_id)->getSnapshot();
-
-                    if ($chatSnapshot->exists()) {
-                        $chatrooms[] = $this->buildTourChatroomPayload($tour);
-                    }
-                }
-
-                return response()->json([
-                    'success' => true,
-                    'message' => 'Chatrooms fetched successfully.',
-                    'data' => [
-                        'type' => $role,
-                        'id' => $requestedId,
-                        'dates_checked' => $datesToCheck,
-                        'chatrooms' => $chatrooms,
-                    ],
-                ]);
+                return $this->chatroomsJsonResponse($role, $requestedId, $datesToCheck, $chatrooms);
             }
 
             $jobsheetQuery = Jobsheet::query()
@@ -284,36 +266,9 @@ class MessageController extends Controller
                 ->unique('tour_id')
                 ->values();
 
-            $database = $this->createFirebaseDatabase();
-            $chatrooms = [];
+            $chatrooms = $this->collectDriverGuideChatrooms($jobsheets);
 
-            foreach ($jobsheets as $jobsheet) {
-                $chatSnapshot = $database->getReference('chat/' . $jobsheet->tour_id)->getSnapshot();
-
-                if ($chatSnapshot->exists()) {
-                    $chatrooms[] = [
-                        'tour_id' => (int) $jobsheet->tour_id,
-                        'chatroom_id' => (int) $jobsheet->tour_id,
-                        'date' => $jobsheet->date,
-                        'data' => $jobsheet->data,
-                        'type' => $jobsheet->type,
-                        'service_type' => $jobsheet->service_type,
-                        'journey_time' => $jobsheet->journey_time,
-                        'current_status' => $jobsheet->current_status,
-                    ];
-                }
-            }
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Chatrooms fetched successfully.',
-                'data' => [
-                    'type' => $role,
-                    'id' => $requestedId,
-                    'dates_checked' => $datesToCheck,
-                    'chatrooms' => $chatrooms,
-                ],
-            ]);
+            return $this->chatroomsJsonResponse($role, $requestedId, $datesToCheck, $chatrooms);
         } catch (\Throwable $e) {
             \Log::error('Chatrooms fetch error: ' . $e->getMessage(), [
                 'role' => $role,
@@ -325,6 +280,95 @@ class MessageController extends Controller
                 'message' => 'Failed to fetch chatrooms.',
                 'error' => $e->getMessage(),
             ], 500);
+        }
+    }
+
+    private function chatroomsJsonResponse(string $role, int $requestedId, array $datesToCheck, array $chatrooms)
+    {
+        return response()->json([
+            'success' => true,
+            'message' => empty($chatrooms) ? 'No Chatrooms for You' : 'Chatrooms fetched successfully.',
+            'data' => [
+                'type' => $role,
+                'id' => $requestedId,
+                'dates_checked' => $datesToCheck,
+                'chatrooms' => $chatrooms,
+            ],
+        ], 200);
+    }
+
+    private function collectAgentDmcChatrooms($tours): array
+    {
+        $database = $this->resolveFirebaseDatabase();
+        if ($database === null) {
+            return [];
+        }
+
+        $chatrooms = [];
+
+        foreach ($tours as $tour) {
+            if (!$this->firebaseChatExists($database, $tour->tour_id)) {
+                continue;
+            }
+
+            try {
+                $chatrooms[] = $this->buildTourChatroomPayload($tour);
+            } catch (\Throwable $e) {
+                \Log::warning('Failed to build agent/dmc chatroom payload for tour ' . $tour->tour_id . ': ' . $e->getMessage());
+            }
+        }
+
+        return $chatrooms;
+    }
+
+    private function collectDriverGuideChatrooms($jobsheets): array
+    {
+        $database = $this->resolveFirebaseDatabase();
+        if ($database === null) {
+            return [];
+        }
+
+        $chatrooms = [];
+
+        foreach ($jobsheets as $jobsheet) {
+            if (!$this->firebaseChatExists($database, $jobsheet->tour_id)) {
+                continue;
+            }
+
+            $chatrooms[] = [
+                'tour_id' => (int) $jobsheet->tour_id,
+                'chatroom_id' => (int) $jobsheet->tour_id,
+                'date' => $jobsheet->date,
+                'data' => $jobsheet->data,
+                'type' => $jobsheet->type,
+                'service_type' => $jobsheet->service_type,
+                'journey_time' => $jobsheet->journey_time,
+                'current_status' => $jobsheet->current_status,
+            ];
+        }
+
+        return $chatrooms;
+    }
+
+    private function resolveFirebaseDatabase(): ?Database
+    {
+        try {
+            return $this->createFirebaseDatabase();
+        } catch (\Throwable $e) {
+            \Log::warning('Firebase database init failed: ' . $e->getMessage());
+
+            return null;
+        }
+    }
+
+    private function firebaseChatExists(Database $database, int|string $tourId): bool
+    {
+        try {
+            return $database->getReference('chat/' . $tourId)->getSnapshot()->exists();
+        } catch (\Throwable $e) {
+            \Log::warning('Firebase chat lookup failed for tour ' . $tourId . ': ' . $e->getMessage());
+
+            return false;
         }
     }
 
@@ -469,16 +513,30 @@ class MessageController extends Controller
         $checkIn = $tour->check_in_time;
         $checkOut = $tour->check_out_time;
 
+        $formatDate = function ($value): ?string {
+            if ($value === null) {
+                return null;
+            }
+
+            if ($value instanceof \DateTimeInterface) {
+                return $value->format('Y-m-d');
+            }
+
+            $timestamp = strtotime((string) $value);
+
+            return $timestamp !== false ? date('Y-m-d', $timestamp) : null;
+        };
+
         return [
             'tour_id' => (int) $tour->tour_id,
             'chatroom_id' => (int) $tour->tour_id,
-            'date' => $checkIn ? $checkIn->format('Y-m-d') : null,
+            'date' => $formatDate($checkIn),
             'destination' => $tour->destination,
             'adult' => $tour->adult,
             'child' => $tour->child,
             'infant' => $tour->infant,
-            'check_in_time' => $checkIn ? $checkIn->format('Y-m-d') : null,
-            'check_out_time' => $checkOut ? $checkOut->format('Y-m-d') : null,
+            'check_in_time' => $formatDate($checkIn),
+            'check_out_time' => $formatDate($checkOut),
             'male_count' => $tour->male_count,
             'female_count' => $tour->female_count,
             'child_ages' => $tour->child_ages,

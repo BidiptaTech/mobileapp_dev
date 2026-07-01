@@ -816,6 +816,7 @@ class AuthController extends Controller
                         'email' => $dmc->email,
                         'country_code' => $dmc->country_code,
                         'phone' => $dmc->phone,
+                        'user_id' => $dmc->userId,
                         'dmcId' => $dmc->dmcId,
                         'country' => $dmc->country,
                         'company_name' => $dmc->company_name,
@@ -1355,6 +1356,108 @@ class AuthController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error updating guide',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    function updateAgent(Request $request)
+    {
+        try {
+            $request->validate([
+                'agent_id' => 'required',
+                'current_password' => 'nullable',
+                'app_password' => 'nullable',
+                'profile_image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
+            ]);
+
+            $agent = $request->agent;
+            if ((int) $agent->agent_id !== (int) $request->agent_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized',
+                ], 403);
+            }
+
+            if ($request->filled('app_password')) {
+                if (!$this->passwordMatches($request->current_password, $agent->password)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Incorrect current password',
+                    ], 403);
+                }
+                $agent->password = $request->app_password;
+            }
+
+            if ($request->hasFile('profile_image')) {
+                $pathData = CommonHelper::image_path('file_storage', $request->file('profile_image'));
+                if (!empty($pathData['master_value'])) {
+                    $agent->agent_image = $pathData['master_value'];
+                }
+            }
+
+            $agent->save();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Agent updated successfully',
+                'data' => $agent->refresh()
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error updating agent. ' . $e->getMessage(),
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    function updateDmc(Request $request)
+    {
+        try {
+            $request->validate([
+                'user_id' => 'required',
+                'current_password' => 'nullable',
+                'app_password' => 'nullable',
+                'profile_image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
+            ]);
+
+            $dmc = $request->dmc;
+            if ((int) $dmc->userId !== (int) $request->user_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized',
+                ], 403);
+            }
+
+            if ($request->filled('app_password')) {
+                if (!$this->passwordMatches($request->current_password, $dmc->password)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Incorrect current password',
+                    ], 403);
+                }
+                $dmc->password = $request->app_password;
+            }
+
+            if ($request->hasFile('profile_image')) {
+                $pathData = CommonHelper::image_path('file_storage', $request->file('profile_image'));
+                if (!empty($pathData['master_value'])) {
+                    $dmc->profile_image = $pathData['master_value'];
+                }
+            }
+
+            $dmc->save();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'DMC updated successfully',
+                'data' => $dmc->refresh()
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error updating DMC. ' . $e->getMessage(),
                 'error' => $e->getMessage()
             ], 500);
         }
