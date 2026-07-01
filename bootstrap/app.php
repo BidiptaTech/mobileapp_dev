@@ -27,6 +27,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'is.guide' => \App\Http\Middleware\EnsureUserIsGuide::class,
             'is.guest' => \App\Http\Middleware\EnsureUserIsGuest::class,
             'is.restaurant' => \App\Http\Middleware\EnsureUserIsRestaurant::class,
+            'is.agent' => \App\Http\Middleware\EnsureUserIsAgent::class,
+            'is.dmc' => \App\Http\Middleware\EnsureUserIsDmc::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
