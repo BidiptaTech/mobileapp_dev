@@ -299,15 +299,14 @@ class MessageController extends Controller
 
     private function collectAgentDmcChatrooms($tours): array
     {
-        $database = $this->resolveFirebaseDatabase();
-        if ($database === null) {
-            return [];
-        }
+        $database = $this->createFirebaseDatabase();
 
         $chatrooms = [];
 
         foreach ($tours as $tour) {
-            if (!$this->firebaseChatExists($database, $tour->tour_id)) {
+            $chatSnapshot = $database->getReference('chat/' . $tour->tour_id)->getSnapshot();
+
+            if (!$chatSnapshot->exists()) {
                 continue;
             }
 
@@ -323,15 +322,14 @@ class MessageController extends Controller
 
     private function collectDriverGuideChatrooms($jobsheets): array
     {
-        $database = $this->resolveFirebaseDatabase();
-        if ($database === null) {
-            return [];
-        }
+        $database = $this->createFirebaseDatabase();
 
         $chatrooms = [];
 
         foreach ($jobsheets as $jobsheet) {
-            if (!$this->firebaseChatExists($database, $jobsheet->tour_id)) {
+            $chatSnapshot = $database->getReference('chat/' . $jobsheet->tour_id)->getSnapshot();
+
+            if (!$chatSnapshot->exists()) {
                 continue;
             }
 
@@ -348,28 +346,6 @@ class MessageController extends Controller
         }
 
         return $chatrooms;
-    }
-
-    private function resolveFirebaseDatabase(): ?Database
-    {
-        try {
-            return $this->createFirebaseDatabase();
-        } catch (\Throwable $e) {
-            \Log::warning('Firebase database init failed: ' . $e->getMessage());
-
-            return null;
-        }
-    }
-
-    private function firebaseChatExists(Database $database, int|string $tourId): bool
-    {
-        try {
-            return $database->getReference('chat/' . $tourId)->getSnapshot()->exists();
-        } catch (\Throwable $e) {
-            \Log::warning('Firebase chat lookup failed for tour ' . $tourId . ': ' . $e->getMessage());
-
-            return false;
-        }
     }
 
     /**
