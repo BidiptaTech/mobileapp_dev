@@ -334,11 +334,13 @@ class AuthController extends Controller
                     $exitPortFields = $this->getExitPortDepartureFieldsFromBookingId($driverExitPortJobsheet->order_id);
                 }
                 
-                if($orderData && isset($orderData[0])){
+                $orderRow = ($orderData && isset($orderData[0]) && is_array($orderData[0])) ? $orderData[0] : null;
+
+                if ($orderRow && $this->orderDataHasCustomerFields($orderRow)) {
                     $share_status = null; // default
                     $guest = null;
-                    if (!empty($orderData[0]['email'])) {
-                        $guest = Guest::where('email', $orderData[0]['email'])
+                    if (!empty($orderRow['email'])) {
+                        $guest = Guest::where('email', $orderRow['email'])
                             ->first();
                         
                         $share_status = $guest?->share_contact; // null-safe access
@@ -353,13 +355,13 @@ class AuthController extends Controller
                     }
                     
                     $customerInfo = [
-                        'name' => $guest?->guest_name ?? $orderData[0]['fullName'] ?? '',
-                        'email' => $guest?->email ?? $orderData[0]['email'] ?? '',
+                        'name' => $guest?->guest_name ?? $orderRow['fullName'] ?? '',
+                        'email' => $guest?->email ?? $orderRow['email'] ?? '',
                         'isContactShared' => $share_status,
-                        'phone' => $share_status == 1 ? $guest?->contact ?? $orderData[0]['phone'] : 'Not Shared',
-                        'address' => $orderData[0]['address1'] ?? '',
-                        'state' => $orderData[0]['state'] ?? '',
-                        'zip' => $orderData[0]['zip'] ?? '',
+                        'phone' => $share_status == 1 ? $guest?->contact ?? $orderRow['phone'] : 'Not Shared',
+                        'address' => $orderRow['address1'] ?? '',
+                        'state' => $orderRow['state'] ?? '',
+                        'zip' => $orderRow['zip'] ?? '',
                         'whatsapp_no' => $guest_whatsapp_no ?? '',
                     ];
 
@@ -375,7 +377,44 @@ class AuthController extends Controller
 
                     $customer_info[$tourId] = $customerInfo;
                     
-                    $dmc_id = $orderData[0]['dmc_id'] ?? $orderData[0]['dmc_Id'] ?? $orderData[0]['priceModeId'] ?? $orderData[0]['dmcId'] ?? null;
+                    $dmc_id = $orderRow['dmc_id'] ?? $orderRow['dmc_Id'] ?? $orderRow['priceModeId'] ?? $orderRow['dmcId'] ?? null;
+                }
+                elseif ($tourCustomerFields = $this->resolveCustomerFieldsFromTour($tourId)) {
+                    $share_status = null;
+                    $guest = null;
+                    $guest_whatsapp_no = null;
+
+                    if (!empty($tourCustomerFields['email'])) {
+                        $guest = Guest::where('email', $tourCustomerFields['email'])->first();
+                    } else {
+                        $guest = Guest::whereJsonContains('tour_id', $tourId)->first();
+                    }
+
+                    $share_status = $guest?->share_contact;
+                    $guest_whatsapp_no = $guest?->whatsapp_no;
+
+                    $customerInfo = [
+                        'name' => $guest?->guest_name ?? $tourCustomerFields['name'] ?? '',
+                        'email' => $guest?->email ?? $tourCustomerFields['email'] ?? '',
+                        'isContactShared' => $share_status,
+                        'phone' => $share_status == 1 ? $guest?->contact ?? $tourCustomerFields['phone'] : 'Not Shared',
+                        'address' => $tourCustomerFields['address'] ?? '',
+                        'state' => $tourCustomerFields['state'] ?? '',
+                        'zip' => $tourCustomerFields['zip'] ?? '',
+                        'whatsapp_no' => $guest_whatsapp_no ?? '',
+                    ];
+
+                    if ($driverEntryPortJobsheet) {
+                        $customerInfo['arrival_transport_type'] = $entryPortFields['arrival_transport_type'];
+                        $customerInfo['arrival_flight_no'] = $entryPortFields['arrival_flight_no'];
+                    }
+
+                    if ($driverExitPortJobsheet) {
+                        $customerInfo['departure_transport_type'] = $exitPortFields['departure_transport_type'];
+                        $customerInfo['departure_flight_no'] = $exitPortFields['departure_flight_no'];
+                    }
+
+                    $customer_info[$tourId] = $customerInfo;
                 }
                 else{
                     $customerInfo = [
@@ -503,26 +542,58 @@ class AuthController extends Controller
                 // entry_port jobsheets are usually assigned to drivers, not guides — look up by tour + date
                 $entryPortFields = $this->getEntryPortArrivalFieldsForTourFromJobsheet($tourId);
 
-                if($orderData && isset($orderData[0])){
+                $orderRow = ($orderData && isset($orderData[0]) && is_array($orderData[0])) ? $orderData[0] : null;
+
+                if ($orderRow && $this->orderDataHasCustomerFields($orderRow)) {
                     $share_status = null; // default
                     $guest_whatsapp_no = null;
 
-                    if (!empty($orderData[0]['email'])) {
+                    if (!empty($orderRow['email'])) {
                         $guest = Guest::whereJsonContains('tour_id', $tourId)
-                            ->where('email', $orderData[0]['email'])
+                            ->where('email', $orderRow['email'])
                             ->first();
 
                         $share_status = $guest?->share_contact; // null-safe access
                         $guest_whatsapp_no = $guest?->whatsapp_no;
                     }
                     $customer_info[$tourId] = [
-                        'name' => $orderData[0]['fullName'],
-                        'email' => $orderData[0]['email'],
+                        'name' => $orderRow['fullName'] ?? null,
+                        'email' => $orderRow['email'] ?? null,
                         'isContactShared' => $share_status,
-                        'phone' => $share_status == 1 ? $orderData[0]['phone'] : 'Not Shared',
-                        'address' => $orderData[0]['address1'],
-                        'state' => $orderData[0]['state'],
-                        'zip' => $orderData[0]['zip'],
+                        'phone' => $share_status == 1 ? ($orderRow['phone'] ?? null) : 'Not Shared',
+                        'address' => $orderRow['address1'] ?? null,
+                        'state' => $orderRow['state'] ?? null,
+                        'zip' => $orderRow['zip'] ?? null,
+                        'whatsapp_no' => $guest_whatsapp_no ?? '',
+                        'arrival_transport_type' => $entryPortFields['arrival_transport_type'],
+                        'arrival_flight_no' => $entryPortFields['arrival_flight_no'],
+                    ];
+                }
+                elseif ($tourCustomerFields = $this->resolveCustomerFieldsFromTour($tourId)) {
+                    $share_status = null;
+                    $guest_whatsapp_no = null;
+
+                    if (!empty($tourCustomerFields['email'])) {
+                        $guest = Guest::whereJsonContains('tour_id', $tourId)
+                            ->where('email', $tourCustomerFields['email'])
+                            ->first();
+
+                        $share_status = $guest?->share_contact;
+                        $guest_whatsapp_no = $guest?->whatsapp_no;
+                    } else {
+                        $guest = Guest::whereJsonContains('tour_id', $tourId)->first();
+                        $share_status = $guest?->share_contact;
+                        $guest_whatsapp_no = $guest?->whatsapp_no;
+                    }
+
+                    $customer_info[$tourId] = [
+                        'name' => $tourCustomerFields['name'],
+                        'email' => $tourCustomerFields['email'],
+                        'isContactShared' => $share_status,
+                        'phone' => $share_status == 1 ? ($tourCustomerFields['phone'] ?? null) : 'Not Shared',
+                        'address' => $tourCustomerFields['address'],
+                        'state' => $tourCustomerFields['state'],
+                        'zip' => $tourCustomerFields['zip'],
                         'whatsapp_no' => $guest_whatsapp_no ?? '',
                         'arrival_transport_type' => $entryPortFields['arrival_transport_type'],
                         'arrival_flight_no' => $entryPortFields['arrival_flight_no'],
@@ -2393,5 +2464,90 @@ class AuthController extends Controller
         }
 
         return null;
+    }
+
+    private function orderDataHasCustomerFields(array $data): bool
+    {
+        return !empty($data['fullName'])
+            || !empty($data['email'])
+            || !empty($data['phone'])
+            || !empty($data['address1']);
+    }
+
+    /**
+     * @return array{name: ?string, email: ?string, phone: ?string, address: ?string, state: ?string, zip: ?string}|null
+     */
+    private function resolveCustomerFieldsFromTour(int|string $tourId): ?array
+    {
+        $tour = Tour::query()
+            ->select('mainguest', 'additionalguest')
+            ->where('tour_id', $tourId)
+            ->first();
+
+        if (!$tour) {
+            return null;
+        }
+
+        $mainGuest = $this->decodeTourJsonField($tour->mainguest);
+        if (is_array($mainGuest) && $this->tourMainGuestHasCustomerFields($mainGuest)) {
+            return [
+                'name' => $this->formatGuestName($mainGuest['salutation'] ?? null, $mainGuest['full_name'] ?? null),
+                'email' => $mainGuest['email'] ?? null,
+                'phone' => $mainGuest['phone'] ?? null,
+                'address' => $mainGuest['address1'] ?? null,
+                'state' => $mainGuest['state'] ?? null,
+                'zip' => $mainGuest['zip'] ?? null,
+            ];
+        }
+
+        $additionalGuests = $this->decodeTourJsonField($tour->additionalguest);
+        if (is_array($additionalGuests) && isset($additionalGuests[0]) && is_array($additionalGuests[0])) {
+            $guest = $additionalGuests[0];
+
+            return [
+                'name' => $this->formatGuestName($guest['salutation'] ?? null, $guest['name'] ?? null),
+                'email' => null,
+                'phone' => $guest['contact_no'] ?? null,
+                'address' => null,
+                'state' => null,
+                'zip' => null,
+            ];
+        }
+
+        return null;
+    }
+
+    private function tourMainGuestHasCustomerFields(array $mainGuest): bool
+    {
+        return !empty($mainGuest['full_name'])
+            || !empty($mainGuest['email'])
+            || !empty($mainGuest['phone'])
+            || !empty($mainGuest['address1']);
+    }
+
+    private function decodeTourJsonField(mixed $value): mixed
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (is_array($value)) {
+            return $value;
+        }
+
+        if (!is_string($value)) {
+            return null;
+        }
+
+        $decoded = json_decode($value, true);
+
+        return json_last_error() === JSON_ERROR_NONE ? $decoded : null;
+    }
+
+    private function formatGuestName(?string $salutation, ?string $name): ?string
+    {
+        $formattedName = trim(trim((string) $salutation) . ' ' . trim((string) $name));
+
+        return $formattedName !== '' ? $formattedName : null;
     }
 }
