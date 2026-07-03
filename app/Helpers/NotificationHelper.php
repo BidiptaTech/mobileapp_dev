@@ -2,11 +2,10 @@
 
 namespace App\Helpers;
 
-use Illuminate\Http\Request;
-use Kreait\Firebase\Factory;
+use Kreait\Firebase\Contract\Database;
+use Kreait\Firebase\Contract\Messaging;
 use Kreait\Firebase\Messaging\CloudMessage;
 use Kreait\Firebase\Messaging\Notification;
-use App\Http\Controllers\NotificationController;
 
 class NotificationHelper
 {
@@ -23,12 +22,8 @@ class NotificationHelper
     public static function sendNotificationToGuest($emails, $title, $body, $image = null, $data = [])
     {
         try {
-            $firebase = (new Factory)
-                ->withServiceAccount(storage_path('app/firebase/firebase_credentials.json'))
-                ->withDatabaseUri('https://travhorse-96ee0-default-rtdb.asia-southeast1.firebasedatabase.app');
-            
-            $database = $firebase->createDatabase();
-            $messaging = $firebase->createMessaging();
+            $database = app(Database::class);
+            $messaging = app(Messaging::class);
             // Convert single email to array
             $emailArray = is_array($emails) ? $emails : [$emails];
             $results = [];
