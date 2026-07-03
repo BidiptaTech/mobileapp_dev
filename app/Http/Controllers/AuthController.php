@@ -1034,7 +1034,7 @@ class AuthController extends Controller
                     elseif(($order->type == 'travel_point' || $order->type == 'entry_port' || $order->type == 'exit_port' || $order->type == 'travel_hourly' || $order->type == 'local_transport') && !empty($orderData)){
                         // Get vehicle_id and driver_id from jobsheet table for this specific order
                         $jobsheet = DB::table('jobsheets')
-                                    ->select('vehicle_id', 'driver_id','comments')
+                                    ->select('vehicle_id', 'driver_id', 'comments', 'current_status')
                                     ->where('order_id', $order->booking_id)
                                     ->where('type', $order->type)
                                     ->first();
@@ -1098,6 +1098,8 @@ class AuthController extends Controller
                                 $order->driver_image = $driver->image ?? null;
                             }
                         }
+
+                        $order->status = $this->resolveJobsheetStatus($jobsheet);
                     }
                     elseif($order->type == 'restaurant' && !empty($orderData) && isset($orderData[0]['restaurantId'])){
                         $restaurantId = $orderData[0]['restaurantId'];
@@ -1111,7 +1113,7 @@ class AuthController extends Controller
                     elseif($order->type == 'guide' && !empty($orderData)){
                         // Get guide_id from jobsheet table for this specific order
                         $jobsheet = DB::table('jobsheets')
-                                    ->select('guide_id', 'comments')
+                                    ->select('guide_id', 'comments', 'current_status')
                                     ->where('order_id', $order->booking_id)
                                     ->where('type', 'guide')
                                     ->first();
@@ -1159,6 +1161,8 @@ class AuthController extends Controller
                                 $order->guide_image = $guide->image ?? null;
                             }
                         }
+
+                        $order->status = $this->resolveJobsheetStatus($jobsheet);
                     }
                     elseif ($order->type == 'attraction_package' && isset($orderData[0]['package_attraction_id'])) {
                         $packageAttractionId = $orderData[0]['package_attraction_id'];
@@ -1560,9 +1564,17 @@ class AuthController extends Controller
             $guestEmails = Guest::where(function($query) use ($tour_id) {
                 // If tour_id is stored as JSON array, check if it contains the value
                 $query->whereJsonContains('tour_id', $tour_id)
+                    ->orWhereJsonContains('tour_id', (string) $tour_id)
                     // Also handle direct value match (in case some records have single value)
                     ->orWhere('tour_id', $tour_id);
-            })->pluck('email')->unique()->toArray();
+            })->pluck('email')->filter()->unique()->values()->toArray();
+
+            \Log::info('updateJobsheetStatus guest lookup', [
+                'jobsheet_id' => $request->id,
+                'tour_id' => $tour_id,
+                'guest_email_count' => count($guestEmails),
+                'guest_emails' => $guestEmails,
+            ]);
             // Define status mapping based on jobsheet type
             $driverStatusMap = [
                 1 => 'started',
@@ -1778,6 +1790,11 @@ class AuthController extends Controller
                 );
 
                 \Log::info('Notification sent to guests', ['result' => $notificationResult]);
+            } else {
+                \Log::info('Notification skipped: no guest emails found for tour', [
+                    'jobsheet_id' => $request->id,
+                    'tour_id' => $tour_id,
+                ]);
             }
 
             return response()->json([
@@ -2433,6 +2450,15 @@ class AuthController extends Controller
             'departure_transport_type' => $dataRow !== null ? ($dataRow['departure_transport_type'] ?? null) : null,
             'departure_flight_no' => $dataRow !== null ? ($dataRow['departure_flight_no'] ?? null) : null,
         ];
+    }
+
+    private function resolveJobsheetStatus(?object $jobsheet): int
+    {
+        if ($jobsheet === null || $jobsheet->current_status === null || $jobsheet->current_status === '') {
+            return 1;
+        }
+
+        return (int) $jobsheet->current_status;
     }
 
     /**
