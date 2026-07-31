@@ -1987,7 +1987,20 @@ class AuthController extends Controller
     public function exploreCities(Request $request){
         $country = $request->country;
         $city = $request->city;
-        $cityData = City::select('city_id', 'name', 'image')->where('country', $country)->first();
+
+        $cityQuery = City::select('city_id', 'name', 'image')->where('country', $country);
+        if (!empty($city)) {
+            $cityQuery->whereRaw('LOWER(name) = ?', [strtolower(trim($city))]);
+        }
+        $cityData = $cityQuery->first();
+
+        if (!$cityData) {
+            return response()->json([
+                'success' => false,
+                'message' => 'City not found',
+            ], 404);
+        }
+
         $city_exploration = CityExploration::where('city_id', $cityData->city_id)->first();
         if(!$city_exploration){
             return response()->json([
