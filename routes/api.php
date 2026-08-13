@@ -13,6 +13,7 @@ Route::prefix('app/v1')->group(function () {
     Route::post('/login', [AuthController::class, 'login']);
     Route::post('/restaurant-login', [RestaurantController::class, 'restaurantLogin']);
     Route::post('/send-notification', [NotificationController::class, 'send']);
+    Route::post('/validate-token', [AuthController::class, 'validateToken']);
 
     Route::middleware(['auth:sanctum'])->group(function () {
         // Driver routes

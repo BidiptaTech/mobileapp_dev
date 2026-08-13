@@ -1870,6 +1870,199 @@ class AuthController extends Controller
         }
     }
 
+    /**
+     * Validate a Sanctum personal access token for driver/guide/guest/restaurant/dmc/agent.
+     * Expects exactly one ID field plus token.
+     */
+    public function validateToken(Request $request)
+    {
+        try {
+            $identifierMap = [
+                'driver_id' => 'driver-token',
+                'driverid' => 'driver-token',
+                'guide_id' => 'guide-token',
+                'guideid' => 'guide-token',
+                'guest_id' => 'guest-token',
+                'guestid' => 'guest-token',
+                'restaurant_id' => 'restaurant-token',
+                'restaurantid' => 'restaurant-token',
+                'dmc_id' => 'dmc-token',
+                'dmcid' => 'dmc-token',
+                'agent_id' => 'agent-token',
+                'agentid' => 'agent-token',
+            ];
+
+            $filledIdentifiers = [];
+            foreach ($identifierMap as $param => $tokenName) {
+                if ($request->filled($param)) {
+                    $filledIdentifiers[$param] = $tokenName;
+                }
+            }
+
+            if (count($filledIdentifiers) !== 1) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Provide exactly one of: driver_id, guide_id, guest_id, restaurant_id, dmc_id, agent_id.',
+                ], 422);
+            }
+
+            $request->validate([
+                'token' => 'required|string',
+            ]);
+
+            $paramKey = array_key_first($filledIdentifiers);
+            $tokenName = $filledIdentifiers[$paramKey];
+            $tokenableId = (int) $request->input($paramKey);
+            $plainToken = trim((string) $request->input('token'));
+
+            // For DMC, clients may send dmcId; personal_access_tokens.tokenable_id stores users.userId.
+            if (in_array($paramKey, ['dmc_id', 'dmcid'], true)) {
+                $dmcUser = User::query()
+                    ->select('userId')
+                    ->where(function ($query) use ($tokenableId) {
+                        $query->where('userId', $tokenableId)
+                            ->orWhere('dmcId', $tokenableId);
+                    })
+                    ->first();
+
+                if (!$dmcUser) {
+                    return response()->json([
+                        'success' => false,
+                        'valid' => false,
+                        'expired' => false,
+                        'message' => 'DMC not found for the provided id.',
+                    ], 404);
+                }
+
+                $tokenableId = (int) $dmcUser->userId;
+            }
+
+            $tokenHash = $this->hashSanctumToken($plainToken);
+
+            $tokenRows = DB::table('personal_access_tokens')
+                ->where('name', $tokenName)
+                ->where('tokenable_id', $tokenableId)
+                ->get();
+
+            if ($tokenRows->isEmpty()) {
+                return response()->json([
+                    'success' => false,
+                    'valid' => false,
+                    'expired' => false,
+                    'message' => 'No token session found for the provided id and type.',
+                    'data' => [
+                        'type' => $tokenName,
+                        'id' => (int) $request->input($paramKey),
+                    ],
+                ], 404);
+            }
+
+            $matchedToken = $tokenRows->first(function ($row) use ($tokenHash, $plainToken) {
+                if (!is_string($row->token) || $row->token === '') {
+                    return false;
+                }
+
+                if (hash_equals($row->token, $tokenHash)) {
+                    return true;
+                }
+
+                // Also allow matching if client sent already-hashed token value.
+                return hash_equals($row->token, $plainToken);
+            });
+
+            if (!$matchedToken) {
+                return response()->json([
+                    'success' => false,
+                    'valid' => false,
+                    'expired' => false,
+                    'message' => 'Token does not match for the provided id.',
+                    'data' => [
+                        'type' => $tokenName,
+                        'id' => (int) $request->input($paramKey),
+                    ],
+                ], 401);
+            }
+
+            $isExpired = false;
+            if (!empty($matchedToken->expires_at)) {
+                $isExpired = now()->greaterThan($matchedToken->expires_at);
+            }
+
+            // Sanctum config expiration (minutes) can also invalidate tokens.
+            $sanctumExpirationMinutes = config('sanctum.expiration');
+            if (!$isExpired && !empty($sanctumExpirationMinutes)) {
+                $createdAt = $matchedToken->created_at ?? null;
+                if ($createdAt) {
+                    $isExpired = now()->greaterThan(
+                        \Carbon\Carbon::parse($createdAt)->addMinutes((int) $sanctumExpirationMinutes)
+                    );
+                }
+            }
+
+            if ($isExpired) {
+                return response()->json([
+                    'success' => false,
+                    'valid' => false,
+                    'expired' => true,
+                    'message' => 'Token session has expired.',
+                    'data' => [
+                        'type' => $tokenName,
+                        'id' => (int) $request->input($paramKey),
+                        'token_id' => $matchedToken->id,
+                        'expires_at' => $matchedToken->expires_at,
+                        'last_used_at' => $matchedToken->last_used_at,
+                    ],
+                ], 401);
+            }
+
+            return response()->json([
+                'success' => true,
+                'valid' => true,
+                'expired' => false,
+                'message' => 'Token is valid.',
+                'data' => [
+                    'type' => $tokenName,
+                    'id' => (int) $request->input($paramKey),
+                    'token_id' => $matchedToken->id,
+                    'name' => $matchedToken->name,
+                    'tokenable_id' => $matchedToken->tokenable_id,
+                    'expires_at' => $matchedToken->expires_at,
+                    'last_used_at' => $matchedToken->last_used_at,
+                    'created_at' => $matchedToken->created_at,
+                ],
+            ], 200);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'valid' => false,
+                'message' => 'Validation failed.',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'valid' => false,
+                'message' => 'Error validating token. ' . $e->getMessage(),
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Hash a Sanctum plain-text token the same way Sanctum stores it.
+     * Supports both "id|plain" and raw plain token formats.
+     */
+    private function hashSanctumToken(string $token): string
+    {
+        if (str_contains($token, '|')) {
+            [, $plain] = explode('|', $token, 2);
+
+            return hash('sha256', $plain);
+        }
+
+        return hash('sha256', $token);
+    }
+
     public function deleteAccount(Request $request)
     {
         try {
