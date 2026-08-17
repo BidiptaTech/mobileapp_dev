@@ -21,6 +21,7 @@ Route::prefix('app/v1')->group(function () {
             Route::post('/update-driver', [AuthController::class, 'updateDriver']);
             Route::get('/driver-jobsheets', [AuthController::class, 'getDriverJobsheets']);
         });
+        
 
         // Guide routes
         Route::middleware('is.guide')->group(function () {

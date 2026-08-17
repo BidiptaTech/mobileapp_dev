@@ -1808,6 +1808,7 @@ class AuthController extends Controller
                 'message' => 'Validation failed. ' . $e->getMessage(),
                 'errors' => $e->errors()
             ], 422);
+            
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
@@ -1815,7 +1816,9 @@ class AuthController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+
     }
+      
 
     /**
      * Logout function for all user types - receives user_type from frontend
