@@ -1808,7 +1808,6 @@ class AuthController extends Controller
                 'message' => 'Validation failed. ' . $e->getMessage(),
                 'errors' => $e->errors()
             ], 422);
-            
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
