@@ -27,6 +27,7 @@ Route::prefix('app/v1')->group(function () {
             Route::post('/update-guide', [AuthController::class, 'updateGuide']);
             Route::get('/guide-jobsheets', [AuthController::class, 'getGuideJobsheets']);
         });
+        
 
         // Agent routes
         Route::middleware('is.agent')->group(function () {
