@@ -1022,14 +1022,20 @@ class AuthController extends Controller
                         $order->phone = $hotel->phone ?? null;
                         $order->hotel_image = $hotel->main_image ?? null;
                     }
-                    elseif($order->type == 'attraction' && !empty($orderData) && isset($orderData[0]['AttractionId'])){
-                        $attractionId = $orderData[0]['AttractionId'];
-                        $attraction = Attraction::select('location', 'master_image')
+                    elseif($order->type == 'attraction' && !empty($orderData) && (isset($orderData[0]['AttractionId']) || isset($orderData[0]['attraction_id']))){
+                        $attractionId = $orderData[0]['AttractionId'] ?? $orderData[0]['attraction_id'];
+                        $attraction = Attraction::select('location', 'master_image', 'phone')
                                     ->where('attraction_id', $attractionId)
                                     ->first();
-                        $order->city = $attraction->location ?? null;
-                        $order->phone = $attraction->phone ?? null;
-                        $order->attraction_image = $attraction->master_image ?? null;
+                        $order->city = $attraction?->location ?? null;
+                        $order->phone = $attraction?->phone ?? null;
+                        // Prefer uploaded files from orders.upload_files; fall back to attraction master image
+                        $uploadFiles = $order->upload_files;
+                        if (is_string($uploadFiles) && $uploadFiles !== '') {
+                            $decodedUploads = json_decode($uploadFiles, true);
+                            $uploadFiles = (json_last_error() === JSON_ERROR_NONE) ? $decodedUploads : $uploadFiles;
+                        }
+                        $order->attraction_image = !empty($uploadFiles) ? $uploadFiles : ($attraction?->master_image ?? null);
                     }
                     elseif(($order->type == 'travel_point' || $order->type == 'entry_port' || $order->type == 'exit_port' || $order->type == 'travel_hourly' || $order->type == 'local_transport') && !empty($orderData)){
                         // Get vehicle_id and driver_id from jobsheet table for this specific order
@@ -1179,7 +1185,7 @@ class AuthController extends Controller
                             if (is_array($attractionIds) && count($attractionIds) > 0) {
                                 // Fetch the first attraction to get its city (location)
                                 $firstAttraction = DB::table('attractions')
-                                    ->select('location')
+                                    ->select('location', 'master_image')
                                     ->where('attraction_id', $attractionIds[0])
                                     ->first();
                     
@@ -1187,6 +1193,16 @@ class AuthController extends Controller
                                     // Add the city to order data
                                     $order->city = $firstAttraction->location;
                                 }
+
+                                // Prefer uploaded files from orders.upload_files
+                                $uploadFiles = $order->upload_files;
+                                if (is_string($uploadFiles) && $uploadFiles !== '') {
+                                    $decodedUploads = json_decode($uploadFiles, true);
+                                    $uploadFiles = (json_last_error() === JSON_ERROR_NONE) ? $decodedUploads : $uploadFiles;
+                                }
+                                $order->attraction_image = !empty($uploadFiles)
+                                    ? $uploadFiles
+                                    : ($firstAttraction?->master_image ?? null);
                             }
                         }
                     }
