@@ -1195,11 +1195,21 @@ class AuthController extends Controller
                 });
                 
                 // Add orders to tour object
-                $destination = $tour->destination;
-                $country = Country::select('country_image')
-                                    ->where('name', $destination)
-                                    ->first();
-                $tour->destination_image = $country->country_image ?? null;
+                $destinationNames = $this->parseDestinationCountryNames($tour->destination);
+                $destinationImages = [];
+
+                if (!empty($destinationNames)) {
+                    $countries = Country::select('name', 'country_image')
+                        ->whereIn('name', $destinationNames)
+                        ->get()
+                        ->keyBy('name');
+
+                    foreach ($destinationNames as $countryName) {
+                        $destinationImages[$countryName] = $countries->get($countryName)?->country_image ?? null;
+                    }
+                }
+
+                $tour->destination_image = $destinationImages;
                 $tourData = $tour->toArray();
                 $tourData['orders'] = $orders;
                 $tourData['total_orders'] = $orders->count();
@@ -2667,6 +2677,40 @@ class AuthController extends Controller
         }
 
         return (int) $jobsheet->current_status;
+    }
+
+    /**
+     * Parse tour destination into a list of country names.
+     * Supports array, JSON array string, or comma-separated string.
+     *
+     * @return array<int, string>
+     */
+    private function parseDestinationCountryNames(mixed $destination): array
+    {
+        if ($destination === null || $destination === '') {
+            return [];
+        }
+
+        if (is_array($destination)) {
+            $names = $destination;
+        } elseif (is_string($destination)) {
+            $trimmed = trim($destination);
+            $decoded = json_decode($trimmed, true);
+
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                $names = $decoded;
+            } else {
+                $names = preg_split('/\s*,\s*/', $trimmed) ?: [];
+            }
+        } else {
+            return [];
+        }
+
+        $names = array_values(array_unique(array_filter(array_map(function ($name) {
+            return is_string($name) ? trim($name) : '';
+        }, $names), fn ($name) => $name !== '')));
+
+        return $names;
     }
 
     /**
