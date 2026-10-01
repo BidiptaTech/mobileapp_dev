@@ -2491,13 +2491,13 @@ class AuthController extends Controller
                             $guest_whatsapp_no = $guest?->whatsapp_no;
                         }
                         $customer_info[$tourId] = [
-                            'name' => $orderData[0]['fullName'],
-                            'email' => $orderData[0]['email'],
+                            'name' => $orderData[0]['fullName'] ?? '',
+                            'email' => $orderData[0]['email'] ?? '',
                             'isContactShared' => $share_status,
-                            'phone' => $share_status == 1 ? $orderData[0]['phone'] : 'Not Shared',
-                            'address' => $orderData[0]['address1'],
-                            'state' => $orderData[0]['state'],
-                            'zip' => $orderData[0]['zip'],
+                            'phone' => $share_status == 1 ? ($orderData[0]['phone'] ?? '') : 'Not Shared',
+                            'address' => $orderData[0]['address1'] ?? '',
+                            'state' => $orderData[0]['state'] ?? '',
+                            'zip' => $orderData[0]['zip'] ?? '',
                             'whatsapp_no' => $guest_whatsapp_no ?? ''
                         ];
                     }
