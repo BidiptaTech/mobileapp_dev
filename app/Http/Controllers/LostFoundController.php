@@ -7,6 +7,7 @@ use App\Models\LostFound;
 use App\Models\Tour;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 
 class LostFoundController extends Controller
@@ -78,7 +79,7 @@ class LostFoundController extends Controller
                 ],
             ], 201);
         } catch (\Throwable $e) {
-            \Log::error('Lost and found store error: ' . $e->getMessage(), [
+            Log::error('Lost and found store error: ' . $e->getMessage(), [
                 'tour_id' => $validated['tour_id'] ?? null,
                 'dmc_id' => $validated['dmc_id'] ?? null,
             ]);
@@ -118,7 +119,7 @@ class LostFoundController extends Controller
                 ],
             ]);
         } catch (\Throwable $e) {
-            \Log::error('Lost and found fetch error: ' . $e->getMessage(), [
+            Log::error('Lost and found fetch error: ' . $e->getMessage(), [
                 'tour_id' => $validated['tour_id'],
                 'dmc_id' => $validated['dmc_id'],
             ]);
@@ -185,7 +186,7 @@ class LostFoundController extends Controller
                 ],
             ]);
         } catch (\Throwable $e) {
-            \Log::error('Lost and found resolve error: ' . $e->getMessage(), [
+            Log::error('Lost and found resolve error: ' . $e->getMessage(), [
                 'id' => $validated['id'],
             ]);
 

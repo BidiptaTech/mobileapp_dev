@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use App\Models\Order;
 use App\Models\Driver;
 use App\Models\Guide;
@@ -40,7 +41,6 @@ class AuthController extends Controller
             if (!$email || !$password) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Email and password are required',
                     'message' => 'Email and password are required',
                 ], 400);
             }
@@ -179,12 +179,12 @@ class AuthController extends Controller
                 $dmc = null;
             }
             // Debug: Check if guide_id exists
-            \Log::info('Guide ID: ' . ($guide->guide_id ?? 'NULL'));
-            \Log::info('Guide getKey(): ' . $guide->getKey());
+            Log::info('Guide ID: ' . ($guide->guide_id ?? 'NULL'));
+            Log::info('Guide getKey(): ' . $guide->getKey());
             
             // Debug: Check if guide_id exists
-            \Log::info('Guide ID: ' . ($guide->guide_id ?? 'NULL'));
-            \Log::info('Guide getKey(): ' . $guide->getKey());
+            Log::info('Guide ID: ' . ($guide->guide_id ?? 'NULL'));
+            Log::info('Guide getKey(): ' . $guide->getKey());
             
             // Generate Sanctum token
             $token = $guide->createToken('guide-token')->plainTextToken;
@@ -216,7 +216,7 @@ class AuthController extends Controller
     {
         try {
             $driver_id = $request->driver_id; // from middleware
-            $auth_user = auth()->user();
+            $auth_user = $request->user();
 
             if($auth_user->driver_id != $driver_id){
                 return response()->json([
@@ -377,7 +377,7 @@ class AuthController extends Controller
     {
         try {
             $guide_id = $request->guide_id; // from middleware
-            $auth_user = auth()->user();
+            $auth_user = $request->user();
             if($auth_user->guide_id != $guide_id){
                 return response()->json([
                     'success' => false,
@@ -1449,7 +1449,7 @@ class AuthController extends Controller
                     $dataPayload
                 );
 
-                \Log::info('Notification sent to guests', ['result' => $notificationResult]);
+                Log::info('Notification sent to guests', ['result' => $notificationResult]);
             }
 
             return response()->json([
@@ -1574,7 +1574,7 @@ class AuthController extends Controller
     /**
      * Helper function to determine user type based on model
      */
-    private function getUserType($user)
+    private function getUserType(object $user): string
     {
         $className = class_basename(get_class($user));
         
@@ -1663,7 +1663,7 @@ class AuthController extends Controller
         if($userType == 'driver'){
             try {
                 $driver_id = $request->driver_id; // from middleware
-                $auth_user = auth()->user();
+                $auth_user = $request->user();
     
                 if($auth_user->driver_id != $driver_id){
                     return response()->json([
@@ -1810,7 +1810,7 @@ class AuthController extends Controller
         elseif($userType == 'guide'){
             try {
                 $guide_id = $request->guide_id; // from middleware
-                $auth_user = auth()->user();
+                $auth_user = $request->user();
                 if($auth_user->guide_id != $guide_id){
                     return response()->json([
                         'success' => false,

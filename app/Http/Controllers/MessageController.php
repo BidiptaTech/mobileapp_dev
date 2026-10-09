@@ -10,6 +10,7 @@ use App\Models\Jobsheet;
 use App\Models\Tour;
 use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 use Kreait\Firebase\Contract\Database;
 
@@ -98,7 +99,7 @@ class MessageController extends Controller
                 ],
             ]);
         } catch (\Throwable $e) {
-            \Log::error('Chat message initialization error: ' . $e->getMessage(), [
+            Log::error('Chat message initialization error: ' . $e->getMessage(), [
                 'tour_id' => $validated['tour_id'],
                 'id' => $validated['id'],
                 'type' => $validated['type'],
@@ -295,7 +296,7 @@ class MessageController extends Controller
                 ],
             ]);
         } catch (\Throwable $e) {
-            \Log::error('Chatrooms fetch error: ' . $e->getMessage(), [
+            Log::error('Chatrooms fetch error: ' . $e->getMessage(), [
                 'role' => $role,
                 'requested_id' => $requestedId,
             ]);
@@ -317,7 +318,7 @@ class MessageController extends Controller
         return app(Database::class);
     }
 
-    private function matchesAuthenticatedUser($user, string $type, int $id): bool
+    private function matchesAuthenticatedUser(?object $user, string $type, int $id): bool
     {
         return match ($type) {
             'guest' => $user instanceof Guest && (int) $user->guest_id === $id,
