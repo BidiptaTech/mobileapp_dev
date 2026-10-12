@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use App\Models\Guide;
 
 class EnsureUserIsGuide
@@ -20,8 +21,8 @@ class EnsureUserIsGuide
         }
 
         // Debug: Log the user type
-        \Log::info('Guide middleware - User type: ' . get_class($user));
-        \Log::info('Guide middleware - User ID: ' . ($user->id ?? 'NULL'));
+        Log::info('Guide middleware - User type: ' . get_class($user));
+        Log::info('Guide middleware - User ID: ' . ($user->id ?? 'NULL'));
 
         // Check if the authenticated user is actually a Guide
         if (!($user instanceof \App\Models\Guide)) {

@@ -3,6 +3,8 @@
 namespace App\Helpers;
 
 use App\Models\Setting;
+use Illuminate\Contracts\Filesystem\Cloud;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -19,7 +21,7 @@ class CommonHelper
      * @param string|null $fileName Optional blob/file name (use for multi-upload batches)
      * @return array Contains 'master_value' key with the image URL
      */
-    public static function image_path($name, $logoFile, $container = 'uploads', ?string $fileName = null)
+    public static function image_path(string $name, UploadedFile $logoFile, string $container = 'uploads', ?string $fileName = null)
     {
         $get_filestorage = Setting::where('name', $name)->where('status', 1)->first();
         $extension = $logoFile->getClientOriginalExtension() ?: 'jpg';
@@ -36,8 +38,9 @@ class CommonHelper
                     $logoFile->move($destinationPath, $logoName);
                     $logoPath = asset('build/images/' . $logoName);
                 } elseif ($get_filestorage->value == 's3') {
-                    $path = Storage::disk('s3')->putFileAs($container, $logoFile, $logoName);
-                    $logoPath = Storage::disk('s3')->url($path);
+                    $disk = Storage::disk('s3');
+                    $path = $disk->putFileAs($container, $logoFile, $logoName);
+                    $logoPath = $disk instanceof Cloud ? $disk->url($path) : null;
                 } elseif ($get_filestorage->value == 'azure') {
                     // Try the direct blob client method first
                     try {
@@ -77,7 +80,7 @@ class CommonHelper
      * @param string $container Container name (default: 'uploads')
      * @return array Contains 'master_value' key with the image URL
      */
-    public static function uploadToAzure($file, $fileName, $container = 'uploads')
+    public static function uploadToAzure(UploadedFile $file, string $fileName, string $container = 'uploads')
     {
         try {
             // Get Azure configuration
@@ -151,7 +154,7 @@ class CommonHelper
      * @param string $container Container name
      * @return void
      */
-    public static function ensureAzureContainerExists($blobClient, $container)
+    public static function ensureAzureContainerExists(BlobRestProxy $blobClient, string $container)
     {
         try {
             // Try to get container properties
@@ -180,7 +183,7 @@ class CommonHelper
      * @param string $container Container name (default: 'uploads')
      * @return array Contains 'master_value' key with the image URL
      */
-    public static function uploadToAzureWithStorage($file, $fileName, $container = 'uploads')
+    public static function uploadToAzureWithStorage(UploadedFile $file, string $fileName, string $container = 'uploads')
     {
         try {
             // Create a temporary Azure disk configuration for this container
@@ -192,10 +195,11 @@ class CommonHelper
             ]]);
 
             // Store the file in the temporary disk
-            $path = Storage::disk('azure_temp')->putFileAs($container, $file, $fileName);
-            
+            $disk = Storage::disk('azure_temp');
+            $path = $disk->putFileAs($container, $file, $fileName);
+
             // Generate the URL for the stored file
-            $url = Storage::disk('azure_temp')->url($path);
+            $url = $disk instanceof Cloud ? $disk->url($path) : null;
             
             return [
                 'master_value' => $url,
@@ -223,7 +227,7 @@ class CommonHelper
      * @param string $container Container name (default: 'uploads')
      * @return void
      */
-    public static function deleteAzureImage($imageUrl, $container = 'uploads')
+    public static function deleteAzureImage(string $imageUrl, string $container = 'uploads')
     {
         try {
             $config = config('filesystems.disks.azure');

@@ -9,7 +9,10 @@ use App\Models\Guide;
 use App\Models\Jobsheet;
 use App\Models\Tour;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 use Kreait\Firebase\Contract\Database;
 
@@ -98,7 +101,7 @@ class MessageController extends Controller
                 ],
             ]);
         } catch (\Throwable $e) {
-            \Log::error('Chat message initialization error: ' . $e->getMessage(), [
+            Log::error('Chat message initialization error: ' . $e->getMessage(), [
                 'tour_id' => $validated['tour_id'],
                 'id' => $validated['id'],
                 'type' => $validated['type'],
@@ -208,13 +211,13 @@ class MessageController extends Controller
                     $toursQuery->whereDate('check_in_time', $requestedDate);
                 } else {
                     // Default for agent/dmc: include tours active on today or tomorrow.
-                    $toursQuery->where(function ($outerQuery) use ($datesToCheck) {
+                    $toursQuery->where(function (Builder $outerQuery) use ($datesToCheck) {
                         foreach ($datesToCheck as $dateToCheck) {
-                            $outerQuery->orWhere(function ($activeOnDateQuery) use ($dateToCheck) {
+                            $outerQuery->orWhere(function (Builder $activeOnDateQuery) use ($dateToCheck) {
                                 $activeOnDateQuery->whereDate('check_in_time', '<=', $dateToCheck)
-                                    ->where(function ($checkOutQuery) use ($dateToCheck) {
+                                    ->where(function (Builder $checkOutQuery) use ($dateToCheck) {
                                         $checkOutQuery->whereDate('check_out_time', '>=', $dateToCheck)
-                                            ->orWhere(function ($nullCheckOutQuery) use ($dateToCheck) {
+                                            ->orWhere(function (Builder $nullCheckOutQuery) use ($dateToCheck) {
                                                 $nullCheckOutQuery->whereNull('check_out_time')
                                                     ->whereDate('check_in_time', $dateToCheck);
                                             });
@@ -233,7 +236,7 @@ class MessageController extends Controller
                 $tours = $toursQuery
                     ->orderBy('check_in_time')
                     ->get()
-                    ->filter(fn ($tour) => !empty($tour->tour_id))
+                    ->filter(fn (Tour $tour) => !empty($tour->tour_id))
                     ->unique('tour_id')
                     ->values();
 
@@ -245,7 +248,7 @@ class MessageController extends Controller
             $jobsheetQuery = Jobsheet::query()
                 ->select('tour_id', 'data', 'type', 'service_type', 'journey_time', 'current_status', 'date')
                 ->whereIn('date', $datesToCheck)
-                ->whereHas('tour', function ($query) {
+                ->whereHas('tour', function (Builder $query) {
                     $query->whereIn('tour_status', ['Confirmed', 'Definite', 'Actual']);
                 });
 
@@ -262,7 +265,7 @@ class MessageController extends Controller
             $jobsheets = $jobsheetQuery
                 ->orderBy('date')
                 ->get()
-                ->filter(fn ($jobsheet) => !empty($jobsheet->tour_id))
+                ->filter(fn (Jobsheet $jobsheet) => !empty($jobsheet->tour_id))
                 ->unique('tour_id')
                 ->values();
 
@@ -270,7 +273,7 @@ class MessageController extends Controller
 
             return $this->chatroomsJsonResponse($role, $requestedId, $datesToCheck, $chatrooms);
         } catch (\Throwable $e) {
-            \Log::error('Chatrooms fetch error: ' . $e->getMessage(), [
+            Log::error('Chatrooms fetch error: ' . $e->getMessage(), [
                 'role' => $role,
                 'requested_id' => $requestedId,
             ]);
@@ -297,7 +300,10 @@ class MessageController extends Controller
         ], 200);
     }
 
-    private function collectAgentDmcChatrooms($tours): array
+    /**
+     * @param Collection<int, Tour> $tours
+     */
+    private function collectAgentDmcChatrooms(Collection $tours): array
     {
         $database = $this->createFirebaseDatabase();
 
@@ -313,14 +319,17 @@ class MessageController extends Controller
             try {
                 $chatrooms[] = $this->buildTourChatroomPayload($tour);
             } catch (\Throwable $e) {
-                \Log::warning('Failed to build agent/dmc chatroom payload for tour ' . $tour->tour_id . ': ' . $e->getMessage());
+                Log::warning('Failed to build agent/dmc chatroom payload for tour ' . $tour->tour_id . ': ' . $e->getMessage());
             }
         }
 
         return $chatrooms;
     }
 
-    private function collectDriverGuideChatrooms($jobsheets): array
+    /**
+     * @param Collection<int, Jobsheet> $jobsheets
+     */
+    private function collectDriverGuideChatrooms(Collection $jobsheets): array
     {
         $database = $this->createFirebaseDatabase();
 
@@ -357,7 +366,7 @@ class MessageController extends Controller
         return app(Database::class);
     }
 
-    private function matchesAuthenticatedUser($user, string $type, int $id): bool
+    private function matchesAuthenticatedUser(?object $user, string $type, int $id): bool
     {
         return match ($type) {
             'guest' => $user instanceof Guest && (int) $user->guest_id === $id,
@@ -489,7 +498,7 @@ class MessageController extends Controller
         $checkIn = $tour->check_in_time;
         $checkOut = $tour->check_out_time;
 
-        $formatDate = function ($value): ?string {
+        $formatDate = function (mixed $value): ?string {
             if ($value === null) {
                 return null;
             }

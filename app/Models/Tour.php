@@ -31,7 +31,7 @@ class Tour extends Model
         '4' => 'Cancel',
     ];
 
-    public function canProceedToNextStep($currentStatus, $nextStep)
+    public function canProceedToNextStep(int|string $currentStatus, int|string $nextStep)
     {
         if ($currentStatus == 1 || $currentStatus == 3) {
             return true; 

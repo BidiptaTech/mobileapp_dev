@@ -119,24 +119,24 @@ class Package extends Model
         return $query->where('is_featured', true);
     }
 
-    public function scopeByDestination(Builder $query, $destination)
+    public function scopeByDestination(Builder $query, string $destination)
     {
         return $query->where('destination', $destination);
     }
 
-    public function scopeByCategory(Builder $query, $category)
+    public function scopeByCategory(Builder $query, string $category)
     {
         return $query->where('category', $category);
     }
 
-    public function scopeByPriceRange(Builder $query, $min, $max)
+    public function scopeByPriceRange(Builder $query, int|float|string $min, int|float|string $max)
     {
         return $query->whereBetween('price_adult', [$min, $max]);
     }
 
-    public function scopeSearch(Builder $query, $search)
+    public function scopeSearch(Builder $query, string $search)
     {
-        return $query->where(function ($q) use ($search) {
+        return $query->where(function (Builder $q) use ($search) {
             $q->where('title', 'like', "%{$search}%")
               ->orWhere('description', 'like', "%{$search}%")
               ->orWhere('destination', 'like', "%{$search}%");
@@ -176,7 +176,7 @@ class Package extends Model
     public function getGalleryImageUrlsAttribute()
     {
         if ($this->gallery_images) {
-            return array_map(function ($image) {
+            return array_map(function (string $image) {
                 return asset('storage/' . $image);
             }, $this->gallery_images);
         }
@@ -184,32 +184,32 @@ class Package extends Model
     }
 
     // Mutators
-    public function setSelectedHotelsAttribute($value)
+    public function setSelectedHotelsAttribute(mixed $value)
     {
         $this->attributes['selected_hotels'] = is_array($value) ? json_encode($value) : $value;
     }
 
-    public function setSelectedAttractionsAttribute($value)
+    public function setSelectedAttractionsAttribute(mixed $value)
     {
         $this->attributes['selected_attractions'] = is_array($value) ? json_encode($value) : $value;
     }
 
-    public function setSelectedGuideAttribute($value)
+    public function setSelectedGuideAttribute(mixed $value)
     {
         $this->attributes['selected_guide'] = is_array($value) ? json_encode($value) : $value;
     }
 
-    public function setSelectedRestaurantsAttribute($value)
+    public function setSelectedRestaurantsAttribute(mixed $value)
     {
         $this->attributes['selected_restaurants'] = is_array($value) ? json_encode($value) : $value;
     }
 
-    public function setGalleryImagesAttribute($value)
+    public function setGalleryImagesAttribute(mixed $value)
     {
         $this->attributes['gallery_images'] = is_array($value) ? json_encode($value) : $value;
     }
 
-    public function setAvailableDatesAttribute($value)
+    public function setAvailableDatesAttribute(mixed $value)
     {
         $this->attributes['available_dates'] = is_array($value) ? json_encode($value) : $value;
     }
@@ -220,7 +220,7 @@ class Package extends Model
         $this->increment('views_count');
     }
 
-    public function updateRating($newRating)
+    public function updateRating(int|float|string $newRating)
     {
         $totalRating = ($this->rating * $this->reviews_count) + $newRating;
         $this->reviews_count += 1;
@@ -271,7 +271,7 @@ class Package extends Model
         $query = Hotel::query();
         
         if (!empty($hotelIds)) {
-            $query->where(function($q) use ($hotelIds) {
+            $query->where(function (Builder $q) use ($hotelIds) {
                 $q->whereIn('hotel_unique_id', $hotelIds)
                   ->orWhereIn('id', $hotelIds);
             });
@@ -313,7 +313,7 @@ class Package extends Model
         $query = Attraction::query();
         
         if (!empty($attractionIds)) {
-            $query->where(function($q) use ($attractionIds) {
+            $query->where(function (Builder $q) use ($attractionIds) {
                 $q->whereIn('attraction_id', $attractionIds)
                   ->orWhereIn('id', $attractionIds);
             });

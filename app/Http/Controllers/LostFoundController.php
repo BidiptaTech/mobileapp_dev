@@ -7,6 +7,7 @@ use App\Models\LostFound;
 use App\Models\Tour;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 
 class LostFoundController extends Controller
@@ -78,7 +79,7 @@ class LostFoundController extends Controller
                 ],
             ], 201);
         } catch (\Throwable $e) {
-            \Log::error('Lost and found store error: ' . $e->getMessage(), [
+            Log::error('Lost and found store error: ' . $e->getMessage(), [
                 'tour_id' => $validated['tour_id'] ?? null,
                 'dmc_id' => $validated['dmc_id'] ?? null,
             ]);
@@ -118,7 +119,7 @@ class LostFoundController extends Controller
                 ],
             ]);
         } catch (\Throwable $e) {
-            \Log::error('Lost and found fetch error: ' . $e->getMessage(), [
+            Log::error('Lost and found fetch error: ' . $e->getMessage(), [
                 'tour_id' => $validated['tour_id'],
                 'dmc_id' => $validated['dmc_id'],
             ]);
@@ -156,7 +157,7 @@ class LostFoundController extends Controller
      * @param  mixed  $comments
      * @return array<string, mixed>|null
      */
-    private function latestResolveComment($comments): ?array
+    private function latestResolveComment(mixed $comments): ?array
     {
         $history = $this->normalizeResolveCommentsHistory($comments);
 
@@ -230,7 +231,7 @@ class LostFoundController extends Controller
                 ],
             ]);
         } catch (\Throwable $e) {
-            \Log::error('Lost and found resolve error: ' . $e->getMessage(), [
+            Log::error('Lost and found resolve error: ' . $e->getMessage(), [
                 'id' => $validated['id'],
             ]);
 
@@ -249,7 +250,7 @@ class LostFoundController extends Controller
      * @return array<int, array{resolve: bool, user: string, comments: string, time_date: string}>
      */
     private function appendResolveCommentEntry(
-        $existingComments,
+        mixed $existingComments,
         bool $resolve,
         string $user,
         string $comments
@@ -270,7 +271,7 @@ class LostFoundController extends Controller
      * @param  mixed  $existingComments
      * @return array<int, array<string, mixed>>
      */
-    private function normalizeResolveCommentsHistory($existingComments): array
+    private function normalizeResolveCommentsHistory(mixed $existingComments): array
     {
         $decoded = $this->decodeJsonColumn($existingComments);
 
@@ -323,7 +324,7 @@ class LostFoundController extends Controller
      * @param  mixed  $value
      * @return mixed
      */
-    private function decodeJsonColumn($value)
+    private function decodeJsonColumn(mixed $value): mixed
     {
         if (is_string($value)) {
             $decoded = json_decode($value, true);
@@ -357,7 +358,7 @@ class LostFoundController extends Controller
                     'required',
                     'file',
                     'max:16384',
-                    function (string $attribute, $file, \Closure $fail): void {
+                    function (string $attribute, mixed $file, \Closure $fail): void {
                         if (!$file instanceof UploadedFile || !$file->isValid()) {
                             $fail('Invalid file upload.');
 
@@ -410,14 +411,14 @@ class LostFoundController extends Controller
      * @param  mixed  $urls
      * @return array<int, string>
      */
-    private function normalizeGuestImageUrls($urls): array
+    private function normalizeGuestImageUrls(mixed $urls): array
     {
         if (!is_array($urls)) {
             return is_string($urls) && $urls !== '' ? [$urls] : [];
         }
 
         $flat = [];
-        array_walk_recursive($urls, function ($value) use (&$flat): void {
+        array_walk_recursive($urls, function (mixed $value) use (&$flat): void {
             if (is_string($value) && trim($value) !== '') {
                 $flat[] = trim($value);
             }
@@ -523,7 +524,7 @@ class LostFoundController extends Controller
      * @param  array<int, UploadedFile>  $files
      * @param  array<string, true>  $seen  temp paths already queued
      */
-    private function pushGuestImageFile($file, array &$files, array &$seen): void
+    private function pushGuestImageFile(mixed $file, array &$files, array &$seen): void
     {
         if (!$file instanceof UploadedFile || !$file->isValid()) {
             return;

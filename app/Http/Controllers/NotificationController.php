@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Driver;
 use App\Models\Guide;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Kreait\Firebase\Contract\Database;
 use Kreait\Firebase\Contract\Messaging;
 use Kreait\Firebase\Messaging\AndroidConfig;
@@ -72,7 +73,7 @@ class NotificationController extends Controller
                 'failed' => $failedIndices,
             ]);
         } catch (\Throwable $e) {
-            \Log::error('Notification send error: ' . $e->getMessage());
+            Log::error('Notification send error: ' . $e->getMessage());
 
             return response()->json(['error' => $e->getMessage()], 500);
         }
@@ -217,7 +218,7 @@ class NotificationController extends Controller
                 ],
             ]);
         } catch (\Throwable $e) {
-            \Log::error('Chatroom notification error: ' . $e->getMessage(), [
+            Log::error('Chatroom notification error: ' . $e->getMessage(), [
                 'chatroom_id' => $chatId,
                 'sender_email' => $senderEmail,
             ]);
@@ -273,14 +274,14 @@ class NotificationController extends Controller
             ->whereNotNull('email')
             ->whereRaw('LOWER(TRIM(email)) IN (' . implode(',', array_fill(0, count($normalizedList), '?')) . ')', $normalizedList)
             ->pluck('email')
-            ->map(fn ($email) => strtolower(trim((string) $email)))
+            ->map(fn (mixed $email) => strtolower(trim((string) $email)))
             ->all();
 
         $guideEmails = Guide::query()
             ->whereNotNull('email')
             ->whereRaw('LOWER(TRIM(email)) IN (' . implode(',', array_fill(0, count($normalizedList), '?')) . ')', $normalizedList)
             ->pluck('email')
-            ->map(fn ($email) => strtolower(trim((string) $email)))
+            ->map(fn (mixed $email) => strtolower(trim((string) $email)))
             ->all();
 
         $excludedNormalized = array_values(array_unique(array_merge($driverEmails, $guideEmails)));
@@ -376,7 +377,7 @@ class NotificationController extends Controller
      * @param  mixed  $userTokensNode
      * @return array<int, string>
      */
-    private function extractTokensFromUserTokensNode($userTokensNode): array
+    private function extractTokensFromUserTokensNode(mixed $userTokensNode): array
     {
         if (!is_array($userTokensNode)) {
             return [];

@@ -13,7 +13,6 @@ use App\Models\User;
 class Agent extends Authenticatable
 {
     use HasApiTokens, HasFactory, Notifiable;
-    use HasFactory;
     use SoftDeletes;
 
     protected $primaryKey = 'agent_id';
@@ -72,7 +71,7 @@ class Agent extends Authenticatable
             '257' => 'Burundi (257)',
             '855' => 'Cambodia (855)',
             '237' => 'Cameroon (237)',
-            '1' => 'Canada (1)',
+            '1' => 'Canada / United States (1)',
             '238' => 'Cape Verde (238)',
             '236' => 'Central African Republic (236)',
             '235' => 'Chad (235)',
@@ -112,7 +111,7 @@ class Agent extends Authenticatable
             '1-876' => 'Jamaica (1-876)',
             '81' => 'Japan (81)',
             '962' => 'Jordan (962)',
-            '7' => 'Kazakhstan (7)',
+            '7' => 'Kazakhstan / Russia (7)',
             '254' => 'Kenya (254)',
             '965' => 'Kuwait (965)',
             '996' => 'Kyrgyzstan (996)',
@@ -142,7 +141,6 @@ class Agent extends Authenticatable
             '351' => 'Portugal (351)',
             '974' => 'Qatar (974)',
             '40' => 'Romania (40)',
-            '7' => 'Russia (7)',
             '966' => 'Saudi Arabia (966)',
             '65' => 'Singapore (65)',
             '27' => 'South Africa (27)',
@@ -157,7 +155,6 @@ class Agent extends Authenticatable
             '380' => 'Ukraine (380)',
             '971' => 'United Arab Emirates (971)',
             '44' => 'United Kingdom (44)',
-            '1' => 'United States (1)',
             '598' => 'Uruguay (598)',
             '58' => 'Venezuela (58)',
             '84' => 'Vietnam (84)',
@@ -169,7 +166,7 @@ class Agent extends Authenticatable
         return $this->belongsTo(Agency::class, 'agency_id', 'agency_id');
     }
 
-    public function getDmc($agent_id){
+    public function getDmc(int|string $agent_id){
         $agent = $this->where('agent_id', $agent_id)->first();
         $agent_creator = User::where('userId', $agent->sales_manager_dmc)->first();
         $dmc_id = null;
