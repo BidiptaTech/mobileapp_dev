@@ -99,7 +99,7 @@ class UploadHistory extends Model
     /**
      * Create upload history record
      */
-    public static function createRecord($uploadType, $fileName, $originalFileName, $totalRecords, $successCount, $errorCount, $errors, $uploadedBy)
+    public static function createRecord(string $uploadType, string $fileName, string $originalFileName, int $totalRecords, int $successCount, int $errorCount, mixed $errors, int|string $uploadedBy)
     {
         $status = 'success';
         if ($errorCount > 0 && $successCount > 0) {
@@ -124,7 +124,7 @@ class UploadHistory extends Model
     /**
      * Get recent upload history by type and user
      */
-    public static function getRecentHistory($uploadType, $userId, $limit = 10)
+    public static function getRecentHistory(string $uploadType, int|string $userId, int $limit = 10)
     {
         return self::where('upload_type', $uploadType)
                    ->where('uploaded_by', $userId)

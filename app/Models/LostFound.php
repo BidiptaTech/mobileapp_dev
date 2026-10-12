@@ -31,6 +31,7 @@ class LostFound extends Model
         'dmc_id' => 'integer',
         'images' => 'array',
         'guest_images' => 'array',
+        'comments' => 'array',
         'resolved' => 'boolean',
     ];
 }

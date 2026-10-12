@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -60,7 +61,7 @@ class Agency extends Model
     /**
      * Scope to get only active agencies
      */
-    public function scopeActive($query)
+    public function scopeActive(Builder $query)
     {
         return $query->where('status', 1);
     }
@@ -93,7 +94,7 @@ class Agency extends Model
     /**
      * Add a DMC ID to the dmc_id array
      */
-    public function addDmcId($dmcId)
+    public function addDmcId(int|string $dmcId)
     {
         $dmcIds = $this->getDmcIdsArray();
         if (!in_array($dmcId, $dmcIds)) {
@@ -107,10 +108,10 @@ class Agency extends Model
     /**
      * Remove a DMC ID from the dmc_id array
      */
-    public function removeDmcId($dmcId)
+    public function removeDmcId(int|string $dmcId)
     {
         $dmcIds = $this->getDmcIdsArray();
-        $dmcIds = array_values(array_filter($dmcIds, function($id) use ($dmcId) {
+        $dmcIds = array_values(array_filter($dmcIds, function (mixed $id) use ($dmcId) {
             return $id != $dmcId;
         }));
         $this->dmc_id = $dmcIds;
@@ -121,7 +122,7 @@ class Agency extends Model
     /**
      * Check if a DMC has selected this agency
      */
-    public function hasSelectedByDmc($dmcId)
+    public function hasSelectedByDmc(int|string $dmcId)
     {
         $dmcIds = $this->getDmcIdsArray();
         return in_array($dmcId, $dmcIds);

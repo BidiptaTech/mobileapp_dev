@@ -3,6 +3,7 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\GuestController;
 use App\Http\Controllers\MessageController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\LostFoundController;
@@ -12,6 +13,7 @@ Route::prefix('app/v1')->group(function () {
     Route::post('/login', [AuthController::class, 'login']);
     Route::post('/restaurant-login', [RestaurantController::class, 'restaurantLogin']);
     Route::post('/send-notification', [NotificationController::class, 'send']);
+    Route::post('/validate-token', [AuthController::class, 'validateToken']);
 
     Route::middleware(['auth:sanctum'])->group(function () {
         // Driver routes
@@ -19,16 +21,28 @@ Route::prefix('app/v1')->group(function () {
             Route::post('/update-driver', [AuthController::class, 'updateDriver']);
             Route::get('/driver-jobsheets', [AuthController::class, 'getDriverJobsheets']);
         });
-
+        
         // Guide routes
         Route::middleware('is.guide')->group(function () {
             Route::post('/update-guide', [AuthController::class, 'updateGuide']);
             Route::get('/guide-jobsheets', [AuthController::class, 'getGuideJobsheets']);
         });
+        
+
+        // Agent routes
+        Route::middleware('is.agent')->group(function () {
+            Route::post('/update-agent', [AuthController::class, 'updateAgent']);
+        });
+
+        // DMC routes
+        Route::middleware('is.dmc')->group(function () {
+            Route::post('/update-dmc', [AuthController::class, 'updateDmc']);
+        });
 
         // Guest routes
         Route::middleware('is.guest')->group(function () {
             Route::post('/update-guest', [AuthController::class, 'updateGuest']);
+            Route::post('/save-guest-profile', [GuestController::class, 'saveGuestProfile']);
             Route::get('/guest-bookings', [AuthController::class, 'getGuestBookings']);
         });
 
@@ -51,6 +65,7 @@ Route::prefix('app/v1')->group(function () {
         Route::post('/share-contact-status', [AuthController::class, 'shareContactStatusUpdate']);
         Route::post('/chatrooms', [MessageController::class, 'getChatrooms']);
         Route::post('/send-message', [MessageController::class, 'sendMessage']);
+        Route::post('/send-chatroom-notification', [NotificationController::class, 'sendChatroomNotification']);
         Route::get('/lost-found', [LostFoundController::class, 'index']);
         Route::post('/lost-found', [LostFoundController::class, 'store']);
         Route::get('/upcoming-tours', [AuthController::class, 'upcomingTours']);

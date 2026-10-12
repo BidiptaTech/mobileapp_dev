@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use App\Models\Driver;
 
 class EnsureUserIsDriver
@@ -21,8 +22,8 @@ class EnsureUserIsDriver
         }
 
         // Debug: Log the user type
-        \Log::info('Driver middleware - User type: ' . get_class($user));
-        \Log::info('Driver middleware - User ID: ' . ($user->id ?? 'NULL'));
+        Log::info('Driver middleware - User type: ' . get_class($user));
+        Log::info('Driver middleware - User ID: ' . ($user->id ?? 'NULL'));
 
         // Check if the authenticated user is actually a Driver
         if (!($user instanceof \App\Models\Driver)) {

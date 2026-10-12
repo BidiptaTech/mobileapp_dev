@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use App\Models\Restaurant;
 use App\Models\Order;
@@ -158,7 +159,7 @@ class RestaurantController extends Controller
         $restaurantId = (int) $restaurant->restaurant_id;
 
         $orders = Order::where('type', 'restaurant')
-            ->where(function ($query) use ($restaurantId) {
+            ->where(function (Builder $query) use ($restaurantId) {
                 $patterns = [
                     '%"restaurantId":' . $restaurantId . ',%',
                     '%"restaurantId":' . $restaurantId . '}%',

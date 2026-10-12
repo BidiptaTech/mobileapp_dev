@@ -142,7 +142,7 @@ class LostFoundController extends Controller
             'description' => $item->description,
             'phone' => $item->phone,
             'email' => $item->email,
-            'comments' => $item->comments,
+            'comments' => $this->latestResolveComment($item->comments),
             'images' => $this->decodeJsonColumn($item->images),
             'guest_images' => $this->normalizeGuestImageUrls(
                 $this->decodeJsonColumn($item->guest_images) ?? []
@@ -152,11 +152,33 @@ class LostFoundController extends Controller
     }
 
     /**
-     * Payload is only id + success (mark lost_found row resolved).
+     * Latest resolve comment only (last item in stored history array).
+     *
+     * @param  mixed  $comments
+     * @return array<string, mixed>|null
+     */
+    private function latestResolveComment(mixed $comments): ?array
+    {
+        $history = $this->normalizeResolveCommentsHistory($comments);
+
+        if ($history === []) {
+            return null;
+        }
+
+        $latest = end($history);
+
+        return is_array($latest) ? $latest : null;
+    }
+
+    /**
+     * Payload is id + resolve/success + user + comments — not a new report.
+     * time_date is not accepted from the client; it is added server-side when saving comments JSON.
      */
     private function isResolveLostFoundPayload(Request $request): bool
     {
-        if (!$request->filled('id') || !$request->exists('success')) {
+        $hasResolveFlag = $request->exists('success') || $request->exists('resolve');
+
+        if (!$request->filled('id') || !$hasResolveFlag) {
             return false;
         }
 
@@ -167,15 +189,37 @@ class LostFoundController extends Controller
 
     private function resolveLostFound(Request $request)
     {
+        $resolveValue = $request->input('success', $request->input('resolve'));
+        $parsedResolve = $this->parseResolveBoolean($resolveValue);
+
+        if ($parsedResolve === null) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid resolve value. Use yes/no, true/false, or 1/0.',
+            ], 422);
+        }
+
+        $request->merge(['success' => $parsedResolve]);
+
         $validated = $request->validate([
             'id' => ['required', 'integer', 'exists:lost_found,id'],
             'success' => ['required', 'boolean'],
+            'user' => ['required', 'string', 'max:255'],
+            'comments' => ['required', 'string'],
         ]);
 
         try {
             $lostFound = LostFound::query()->findOrFail($validated['id']);
-            $lostFound->resolved = (bool) $validated['success'];
+            $lostFound->resolved = $validated['success'];
+            $lostFound->comments = $this->appendResolveCommentEntry(
+                $lostFound->comments,
+                $validated['success'],
+                $validated['user'],
+                $validated['comments']
+            );
             $lostFound->save();
+
+            $storedComments = $this->decodeJsonColumn($lostFound->comments);
 
             return response()->json([
                 'success' => true,
@@ -183,6 +227,7 @@ class LostFoundController extends Controller
                 'data' => [
                     'id' => (int) $lostFound->id,
                     'resolved' => (bool) $lostFound->resolved,
+                    'comments' => $storedComments,
                 ],
             ]);
         } catch (\Throwable $e) {
@@ -199,10 +244,87 @@ class LostFoundController extends Controller
     }
 
     /**
+     * Append a resolve comment object; keeps prior entries (migrates legacy single-object JSON).
+     *
+     * @param  mixed  $existingComments
+     * @return array<int, array{resolve: bool, user: string, comments: string, time_date: string}>
+     */
+    private function appendResolveCommentEntry(
+        mixed $existingComments,
+        bool $resolve,
+        string $user,
+        string $comments
+    ): array {
+        $history = $this->normalizeResolveCommentsHistory($existingComments);
+
+        $history[] = [
+            'resolve' => $resolve,
+            'user' => $user,
+            'comments' => $comments,
+            'time_date' => now()->format('Y-m-d H:i:s'),
+        ];
+
+        return $history;
+    }
+
+    /**
+     * @param  mixed  $existingComments
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalizeResolveCommentsHistory(mixed $existingComments): array
+    {
+        $decoded = $this->decodeJsonColumn($existingComments);
+
+        if ($decoded === null || $decoded === '') {
+            return [];
+        }
+
+        if (!is_array($decoded)) {
+            return [];
+        }
+
+        if (array_is_list($decoded)) {
+            return array_values($decoded);
+        }
+
+        if (isset($decoded['resolve']) || isset($decoded['user']) || isset($decoded['comments'])) {
+            return [$decoded];
+        }
+
+        return [];
+    }
+
+    /**
+     * Accept yes/no, true/false, 1/0 (form-data often sends "yes" / "no" strings).
+     */
+    private function parseResolveBoolean(mixed $value): ?bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        if (is_int($value) && in_array($value, [0, 1], true)) {
+            return (bool) $value;
+        }
+
+        $normalized = strtolower(trim((string) $value));
+
+        if (in_array($normalized, ['1', 'true', 'yes', 'on'], true)) {
+            return true;
+        }
+
+        if (in_array($normalized, ['0', 'false', 'no', 'off'], true)) {
+            return false;
+        }
+
+        return null;
+    }
+
+    /**
      * @param  mixed  $value
      * @return mixed
      */
-    private function decodeJsonColumn($value)
+    private function decodeJsonColumn(mixed $value): mixed
     {
         if (is_string($value)) {
             $decoded = json_decode($value, true);
@@ -236,7 +358,7 @@ class LostFoundController extends Controller
                     'required',
                     'file',
                     'max:16384',
-                    function (string $attribute, $file, \Closure $fail): void {
+                    function (string $attribute, mixed $file, \Closure $fail): void {
                         if (!$file instanceof UploadedFile || !$file->isValid()) {
                             $fail('Invalid file upload.');
 
@@ -289,14 +411,14 @@ class LostFoundController extends Controller
      * @param  mixed  $urls
      * @return array<int, string>
      */
-    private function normalizeGuestImageUrls($urls): array
+    private function normalizeGuestImageUrls(mixed $urls): array
     {
         if (!is_array($urls)) {
             return is_string($urls) && $urls !== '' ? [$urls] : [];
         }
 
         $flat = [];
-        array_walk_recursive($urls, function ($value) use (&$flat): void {
+        array_walk_recursive($urls, function (mixed $value) use (&$flat): void {
             if (is_string($value) && trim($value) !== '') {
                 $flat[] = trim($value);
             }
@@ -402,7 +524,7 @@ class LostFoundController extends Controller
      * @param  array<int, UploadedFile>  $files
      * @param  array<string, true>  $seen  temp paths already queued
      */
-    private function pushGuestImageFile($file, array &$files, array &$seen): void
+    private function pushGuestImageFile(mixed $file, array &$files, array &$seen): void
     {
         if (!$file instanceof UploadedFile || !$file->isValid()) {
             return;

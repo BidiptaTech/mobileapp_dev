@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
@@ -65,7 +66,7 @@ class AuthController extends Controller
                 'dmc' => $this->dmcLogin($request),
                 default => response()->json([
                     'success' => false,
-                    'message' => 'Valid type is required (driver, guide, guest, agent, dmc)',
+                    'message' => 'Valid type is required (driver, guide, guest)',
                 ], 400),
             };
 
@@ -230,7 +231,7 @@ class AuthController extends Controller
             $jobsheets = Jobsheet::select('jobsheet_id', 'driver_id', 'tour_id', 'order_id', 'vehicle_id', 'current_status','date', 'data', 'type', 'service_type', 'journey_time','driver_id')->whereNotNull('driver_id')
                 ->where('date', '=', today())
                 ->where('driver_id', $driver_id)
-                ->whereHas('tour', function($query) {
+                ->whereHas('tour', function (Builder $query) {
                     $query->whereIn('tour_status', ['Confirmed', 'Definite', 'Actual']);
                 })
                 ->get();
@@ -240,14 +241,16 @@ class AuthController extends Controller
                 ->values();
 
             // Add vehicle information to each jobsheet
-            $jobsheetsWithVehicles = $jobsheets->map(function ($jobsheet) {
+            $jobsheetsWithVehicles = $jobsheets->map(function (Jobsheet $jobsheet) {
                 $jobsheetData = $jobsheet->toArray();
                 
                 // Get order data if order_id exists
                 if ($jobsheet->order_id) {
                     $order = Order::select('data', 'tour_id')->where('booking_id', $jobsheet->order_id)->first();
                     
-                    $tour = Tour::select('tour_id', 'display_id', 'infant', 'male_count', 'female_count')->where('tour_id', $order->tour_id)->first();
+                    $tour = $order
+                        ? Tour::select('tour_id', 'display_id', 'infant', 'male_count', 'female_count')->where('tour_id', $order->tour_id)->first()
+                        : null;
                     
                     if ($order && $order->data) {
                         $orderData = is_string($order->data) ? json_decode($order->data, true) : $order->data;
@@ -269,9 +272,9 @@ class AuthController extends Controller
                                 'selectedHours' => $data['selectedHours'] ?? null,
                                 'adults' => $data['adults'] ?? null,
                                 'children' => $data['children'] ?? null,
-                                'infant' => $tour->infant ?? null,
-                                'male' => $tour->male_count ?? null,
-                                'female' => $tour->female_count ?? null,
+                                'infant' => $tour?->infant ?? null,
+                                'male' => $tour?->male_count ?? null,
+                                'female' => $tour?->female_count ?? null,
                                 'distance' => $data['distance'] ?? null,
                                 'Night_Start_Time' => $data['Night_Start_Time'] ?? null,
                                 'Night_End_Time' => $data['Night_End_Time'] ?? null,
@@ -311,14 +314,36 @@ class AuthController extends Controller
             $dmc_id = null;
             foreach($tourIds as $tourId){
                 $firstOrder = Order::select('data')->where('tour_id', $tourId)->first();
+                $orderData = $firstOrder && $firstOrder->data
+                    ? (is_string($firstOrder->data) ? json_decode($firstOrder->data, true) : $firstOrder->data)
+                    : null;
+                // Only use airport fields from this driver's own today jobsheets (not other drivers on same tour)
+                $entryPortFields = $this->nullArrivalFields();
+                $exitPortFields = $this->nullDepartureFields();
+
+                $driverEntryPortJobsheet = $jobsheets->first(function (Jobsheet $jobsheet) use ($tourId) {
+                    return (int) $jobsheet->tour_id === (int) $tourId
+                        && strtolower((string) $jobsheet->type) === 'entry_port';
+                });
+                if ($driverEntryPortJobsheet) {
+                    $entryPortFields = $this->getEntryPortArrivalFieldsFromBookingId($driverEntryPortJobsheet->order_id);
+                }
+
+                $driverExitPortJobsheet = $jobsheets->first(function (Jobsheet $jobsheet) use ($tourId) {
+                    return (int) $jobsheet->tour_id === (int) $tourId
+                        && strtolower((string) $jobsheet->type) === 'exit_port';
+                });
+                if ($driverExitPortJobsheet) {
+                    $exitPortFields = $this->getExitPortDepartureFieldsFromBookingId($driverExitPortJobsheet->order_id);
+                }
                 
-                $orderData = is_string($firstOrder->data) ? json_decode($firstOrder->data, true) : $firstOrder->data;
-                
-                if($orderData && isset($orderData[0])){
+                $orderRow = ($orderData && isset($orderData[0]) && is_array($orderData[0])) ? $orderData[0] : null;
+
+                if ($orderRow && $this->orderDataHasCustomerFields($orderRow)) {
                     $share_status = null; // default
                     $guest = null;
-                    if (!empty($orderData[0]['email'])) {
-                        $guest = Guest::where('email', $orderData[0]['email'])
+                    if (!empty($orderRow['email'])) {
+                        $guest = Guest::where('email', $orderRow['email'])
                             ->first();
                         
                         $share_status = $guest?->share_contact; // null-safe access
@@ -332,21 +357,91 @@ class AuthController extends Controller
                         $guest_whatsapp_no = $guest?->whatsapp_no;
                     }
                     
-                    $customer_info[$tourId] = [
-                        'name' => $guest?->guest_name ?? $orderData[0]['fullName'] ?? '',
-                        'email' => $guest?->email ?? $orderData[0]['email'] ?? '',
+                    $customerInfo = [
+                        'name' => $guest?->guest_name ?? $orderRow['fullName'] ?? '',
+                        'email' => $guest?->email ?? $orderRow['email'] ?? '',
                         'isContactShared' => $share_status,
-                        'phone' => $share_status == 1 ? $guest?->contact ?? $orderData[0]['phone'] : 'Not Shared',
-                        'address' => $orderData[0]['address1'] ?? '',
-                        'state' => $orderData[0]['state'] ?? '',
-                        'zip' => $orderData[0]['zip'] ?? '',
-                        'whatsapp_no' => $guest_whatsapp_no ?? ''
+                        'phone' => $share_status == 1 ? $guest?->contact ?? $orderRow['phone'] : 'Not Shared',
+                        'address' => $orderRow['address1'] ?? '',
+                        'state' => $orderRow['state'] ?? '',
+                        'zip' => $orderRow['zip'] ?? '',
+                        'whatsapp_no' => $guest_whatsapp_no ?? '',
                     ];
+
+                    if ($driverEntryPortJobsheet) {
+                        $customerInfo['arrival_transport_type'] = $entryPortFields['arrival_transport_type'];
+                        $customerInfo['arrival_flight_no'] = $entryPortFields['arrival_flight_no'];
+                    }
+
+                    if ($driverExitPortJobsheet) {
+                        $customerInfo['departure_transport_type'] = $exitPortFields['departure_transport_type'];
+                        $customerInfo['departure_flight_no'] = $exitPortFields['departure_flight_no'];
+                    }
+
+                    $customer_info[$tourId] = $customerInfo;
                     
-                    $dmc_id = $orderData[0]['dmc_id'] ?? $orderData[0]['dmc_Id'] ?? $orderData[0]['priceModeId'] ?? $orderData[0]['dmcId'] ?? null;
+                    $dmc_id = $orderRow['dmc_id'] ?? $orderRow['dmc_Id'] ?? $orderRow['priceModeId'] ?? $orderRow['dmcId'] ?? null;
+                }
+                elseif ($tourCustomerFields = $this->resolveCustomerFieldsFromTour($tourId)) {
+                    $share_status = null;
+                    $guest = null;
+                    $guest_whatsapp_no = null;
+
+                    if (!empty($tourCustomerFields['email'])) {
+                        $guest = Guest::where('email', $tourCustomerFields['email'])->first();
+                    } else {
+                        $guest = Guest::whereJsonContains('tour_id', $tourId)->first();
+                    }
+
+                    $share_status = $guest?->share_contact;
+                    $guest_whatsapp_no = $guest?->whatsapp_no;
+
+                    $customerInfo = [
+                        'name' => $guest?->guest_name ?? $tourCustomerFields['name'] ?? '',
+                        'email' => $guest?->email ?? $tourCustomerFields['email'] ?? '',
+                        'isContactShared' => $share_status,
+                        'phone' => $share_status == 1 ? $guest?->contact ?? $tourCustomerFields['phone'] : 'Not Shared',
+                        'address' => $tourCustomerFields['address'] ?? '',
+                        'state' => $tourCustomerFields['state'] ?? '',
+                        'zip' => $tourCustomerFields['zip'] ?? '',
+                        'whatsapp_no' => $guest_whatsapp_no ?? '',
+                    ];
+
+                    if ($driverEntryPortJobsheet) {
+                        $customerInfo['arrival_transport_type'] = $entryPortFields['arrival_transport_type'];
+                        $customerInfo['arrival_flight_no'] = $entryPortFields['arrival_flight_no'];
+                    }
+
+                    if ($driverExitPortJobsheet) {
+                        $customerInfo['departure_transport_type'] = $exitPortFields['departure_transport_type'];
+                        $customerInfo['departure_flight_no'] = $exitPortFields['departure_flight_no'];
+                    }
+
+                    $customer_info[$tourId] = $customerInfo;
                 }
                 else{
-                    $customer_info[$tourId] = null;
+                    $customerInfo = [
+                        'name' => null,
+                        'email' => null,
+                        'isContactShared' => null,
+                        'phone' => null,
+                        'address' => null,
+                        'state' => null,
+                        'zip' => null,
+                        'whatsapp_no' => null,
+                    ];
+
+                    if ($driverEntryPortJobsheet) {
+                        $customerInfo['arrival_transport_type'] = $entryPortFields['arrival_transport_type'];
+                        $customerInfo['arrival_flight_no'] = $entryPortFields['arrival_flight_no'];
+                    }
+
+                    if ($driverExitPortJobsheet) {
+                        $customerInfo['departure_transport_type'] = $exitPortFields['departure_transport_type'];
+                        $customerInfo['departure_flight_no'] = $exitPortFields['departure_flight_no'];
+                    }
+
+                    $customer_info[$tourId] = $customerInfo;
                 }
             }
             
@@ -389,14 +484,14 @@ class AuthController extends Controller
             // Only include jobsheets where tour_status is Confirmed, Definite, or Actual
             $jobsheets = Jobsheet::select('jobsheet_id', 'tour_id', 'order_id', 'current_status','date', 'data', 'type', 'service_type', 'journey_time', 'guide_id')->whereNotNull('guide_id')
                 ->where('guide_id', $guide_id)->where('date', '=', today())
-                ->whereHas('tour', function($query) {
+                ->whereHas('tour', function (Builder $query) {
                     $query->whereIn('tour_status', ['Confirmed', 'Definite', 'Actual']);
                 })
                 ->get();
             
 
             // Add vehicle information and order details to each jobsheet
-            $guideJobsheets = $jobsheets->map(function ($jobsheet) {
+            $guideJobsheets = $jobsheets->map(function (Jobsheet $jobsheet) {
                 $jobsheetData = $jobsheet->toArray();
                 
                 // Get order data if order_id exists
@@ -404,7 +499,9 @@ class AuthController extends Controller
                     $order = Order::select('data', 'tour_id')
                         ->where('booking_id', $jobsheet->order_id)
                         ->first();
-                    $tour = Tour::select('tour_id', 'display_id', 'infant', 'male_count', 'female_count')->where('tour_id', $order->tour_id)->first();
+                    $tour = $order
+                        ? Tour::select('tour_id', 'display_id', 'infant', 'male_count', 'female_count')->where('tour_id', $order->tour_id)->first()
+                        : null;
                     
                     if ($order && $order->data) {
                         $orderData = is_string($order->data) ? json_decode($order->data, true) : $order->data;
@@ -419,10 +516,10 @@ class AuthController extends Controller
                                 'pickupdate' => $data['pickupdate'] ?? null,
                                 'entrytime' => $data['entrytime'] ?? null,
                                 'adults' => $data['adults'] ?? null,
-                                'male' => $tour->male_count ?? null,
-                                'female' => $tour->female_count ?? null,
+                                'male' => $tour?->male_count ?? null,
+                                'female' => $tour?->female_count ?? null,
                                 'children' => $data['children'] ?? null,
-                                'infant' => $tour->infant ?? null,
+                                'infant' => $tour?->infant ?? null,
                                 'hours' => $data['hours'] ?? null,
                                 
                             ];
@@ -443,31 +540,83 @@ class AuthController extends Controller
             $customer_info = [];
             foreach($tourIds as $tourId){
                 $firstOrder = Order::select('data')->where('tour_id', $tourId)->first();
-                $orderData = is_string($firstOrder->data) ? json_decode($firstOrder->data, true) : $firstOrder->data;
-                if($orderData && isset($orderData[0])){
-                    $share_status = null; // default
+                $orderData = $firstOrder && $firstOrder->data
+                    ? (is_string($firstOrder->data) ? json_decode($firstOrder->data, true) : $firstOrder->data)
+                    : null;
 
-                    if (!empty($orderData[0]['email'])) {
+                // entry_port jobsheets are usually assigned to drivers, not guides — look up by tour + date
+                $entryPortFields = $this->getEntryPortArrivalFieldsForTourFromJobsheet($tourId);
+
+                $orderRow = ($orderData && isset($orderData[0]) && is_array($orderData[0])) ? $orderData[0] : null;
+
+                if ($orderRow && $this->orderDataHasCustomerFields($orderRow)) {
+                    $share_status = null; // default
+                    $guest_whatsapp_no = null;
+
+                    if (!empty($orderRow['email'])) {
                         $guest = Guest::whereJsonContains('tour_id', $tourId)
-                            ->where('email', $orderData[0]['email'])
+                            ->where('email', $orderRow['email'])
                             ->first();
 
                         $share_status = $guest?->share_contact; // null-safe access
                         $guest_whatsapp_no = $guest?->whatsapp_no;
                     }
                     $customer_info[$tourId] = [
-                        'name' => $orderData[0]['fullName'],
-                        'email' => $orderData[0]['email'],
+                        'name' => $orderRow['fullName'] ?? null,
+                        'email' => $orderRow['email'] ?? null,
                         'isContactShared' => $share_status,
-                        'phone' => $share_status == 1 ? $orderData[0]['phone'] : 'Not Shared',
-                        'address' => $orderData[0]['address1'],
-                        'state' => $orderData[0]['state'],
-                        'zip' => $orderData[0]['zip'],
-                        'whatsapp_no' => $guest_whatsapp_no ?? ''
+                        'phone' => $share_status == 1 ? ($orderRow['phone'] ?? null) : 'Not Shared',
+                        'address' => $orderRow['address1'] ?? null,
+                        'state' => $orderRow['state'] ?? null,
+                        'zip' => $orderRow['zip'] ?? null,
+                        'whatsapp_no' => $guest_whatsapp_no ?? '',
+                        'arrival_transport_type' => $entryPortFields['arrival_transport_type'],
+                        'arrival_flight_no' => $entryPortFields['arrival_flight_no'],
+                    ];
+                }
+                elseif ($tourCustomerFields = $this->resolveCustomerFieldsFromTour($tourId)) {
+                    $share_status = null;
+                    $guest_whatsapp_no = null;
+
+                    if (!empty($tourCustomerFields['email'])) {
+                        $guest = Guest::whereJsonContains('tour_id', $tourId)
+                            ->where('email', $tourCustomerFields['email'])
+                            ->first();
+
+                        $share_status = $guest?->share_contact;
+                        $guest_whatsapp_no = $guest?->whatsapp_no;
+                    } else {
+                        $guest = Guest::whereJsonContains('tour_id', $tourId)->first();
+                        $share_status = $guest?->share_contact;
+                        $guest_whatsapp_no = $guest?->whatsapp_no;
+                    }
+
+                    $customer_info[$tourId] = [
+                        'name' => $tourCustomerFields['name'],
+                        'email' => $tourCustomerFields['email'],
+                        'isContactShared' => $share_status,
+                        'phone' => $share_status == 1 ? ($tourCustomerFields['phone'] ?? null) : 'Not Shared',
+                        'address' => $tourCustomerFields['address'],
+                        'state' => $tourCustomerFields['state'],
+                        'zip' => $tourCustomerFields['zip'],
+                        'whatsapp_no' => $guest_whatsapp_no ?? '',
+                        'arrival_transport_type' => $entryPortFields['arrival_transport_type'],
+                        'arrival_flight_no' => $entryPortFields['arrival_flight_no'],
                     ];
                 }
                 else{
-                    $customer_info[$tourId] = null;
+                    $customer_info[$tourId] = [
+                        'name' => null,
+                        'email' => null,
+                        'isContactShared' => null,
+                        'phone' => null,
+                        'address' => null,
+                        'state' => null,
+                        'zip' => null,
+                        'whatsapp_no' => null,
+                        'arrival_transport_type' => $entryPortFields['arrival_transport_type'],
+                        'arrival_flight_no' => $entryPortFields['arrival_flight_no'],
+                    ];
                 }
             }
 
@@ -515,6 +664,7 @@ class AuthController extends Controller
                 ->where('email', $email)
                 ->orderBy('id', 'desc')
                 ->first();
+
                
             if (!$guest || !Hash::check($password, $guest->app_password)) {
                 return response()->json([
@@ -526,7 +676,7 @@ class AuthController extends Controller
             // Get all rows with this email and pluck/merge all tour_id (each stored as JSON array e.g. [3385, 3384])
             $tourIds = Guest::where('email', $email)
                 ->pluck('tour_id')
-                ->flatMap(function ($tourId) {
+                ->flatMap(function (mixed $tourId) {
                     $decoded = is_array($tourId) ? $tourId : json_decode($tourId, true);
                     return is_array($decoded) ? $decoded : [];
                 })
@@ -540,16 +690,16 @@ class AuthController extends Controller
             $now = now();
             
             // Calculate tour counts based on check_in_time and check_out_time
-            $pastTours = $tours->filter(function ($tour) use ($now) {
+            $pastTours = $tours->filter(function (Tour $tour) use ($now) {
                 return $tour->check_out_time && $tour->check_out_time < $now;
             })->count();
             
-            $ongoingTours = $tours->filter(function ($tour) use ($now) {
+            $ongoingTours = $tours->filter(function (Tour $tour) use ($now) {
                 return $tour->check_in_time && $tour->check_out_time && 
                        $tour->check_in_time <= $now && $tour->check_out_time >= $now;
             })->count();
             
-            $upcomingTours = $tours->filter(function ($tour) use ($now) {
+            $upcomingTours = $tours->filter(function (Tour $tour) use ($now) {
                 return $tour->check_in_time && $tour->check_in_time > $now;
             })->count();
             
@@ -628,7 +778,7 @@ class AuthController extends Controller
                 ->orderBy('agent_id', 'desc')
                 ->get();
 
-            $agent = $agents->first(function ($candidate) use ($password) {
+            $agent = $agents->first(function (Agent $candidate) use ($password) {
                 return $this->passwordMatches($password, $candidate->password);
             });
 
@@ -719,7 +869,7 @@ class AuthController extends Controller
                 ->orderBy('userId', 'desc')
                 ->get();
 
-            $dmc = $dmcs->first(function ($candidate) use ($password) {
+            $dmc = $dmcs->first(function (User $candidate) use ($password) {
                 return $this->passwordMatches($password, $candidate->password);
             });
 
@@ -742,6 +892,7 @@ class AuthController extends Controller
                         'email' => $dmc->email,
                         'country_code' => $dmc->country_code,
                         'phone' => $dmc->phone,
+                        'user_id' => $dmc->userId,
                         'dmcId' => $dmc->dmcId,
                         'country' => $dmc->country,
                         'company_name' => $dmc->company_name,
@@ -774,7 +925,7 @@ class AuthController extends Controller
             $now = now();
             
             // Decode tour_id JSON array
-            $tourIds = Guest::where('email', $guest->email)->pluck('tour_id')->flatMap(function ($tourId) {
+            $tourIds = Guest::where('email', $guest->email)->pluck('tour_id')->flatMap(function (mixed $tourId) {
             $decoded = is_array($tourId) ? $tourId : json_decode($tourId, true);
             return is_array($decoded) ? $decoded : [];
             })->unique()->values()->all();
@@ -802,16 +953,49 @@ class AuthController extends Controller
             }
             
             $tours = $toursQuery->get();
+            $includeAirportDetails = in_array($status_type, ['ongoing', 'upcoming'], true);
             
             // Map over tours and get all orders for each tour
-            $toursWithOrders = $tours->map(function ($tour) {
+            $toursWithOrders = $tours->map(function (Tour $tour) use ($includeAirportDetails) {
                 // Get all orders for this tour (without the tour relationship to avoid duplication)
                 $agentId = $tour->agent_id;
                 $agent = Agent::select('agency_id')
                     ->where('agent_id', $agentId)
                     ->first();
-                $agency = Agency::select('agency_name', 'phone', 'email', 'wp_number')
-                    ->where('agency_id', $agent->agency_id)
+                $agency = null;
+                if ($agent && $agent->agency_id) {
+                    $agency = Agency::select([
+                        'agency_name',
+                        'email',
+                        'phone',
+                        'country',
+                        'city',
+                        'address',
+                        'postal_code',
+                        'branches',
+                        'contact_person',
+                        'logo',
+                        'wp_number',
+                    ])
+                        ->where('agency_id', $agent->agency_id)
+                        ->first();
+                }
+
+                $dmc = User::select([
+                    'name',
+                    'email',
+                    'country_code',
+                    'phone',
+                    'salutation',
+                    'country',
+                    'company_name',
+                    'city',
+                    'address',
+                    'user_country',
+                    'profile_image',
+                ])
+                    ->where('dmcId', $tour->dmc_id)
+                    ->where('role_id', 11)
                     ->first();
                 
                 $orders = Order::select([
@@ -825,7 +1009,7 @@ class AuthController extends Controller
                     ->where('tour_id', $tour->tour_id)
                     ->get();
                 // Map orders to include hotel info
-                $orders = $orders->map(function ($order) {
+                $orders = $orders->map(function (Order $order) {
 
                     // Make sure data is decoded as array
                     $orderData = is_array($order->data) ? $order->data : json_decode($order->data, true);
@@ -839,23 +1023,29 @@ class AuthController extends Controller
                                     ->first();
 
                         // Add hotel info to order
-                        $order->city = $hotel->city ?? null; // fetched from Hotel table
-                        $order->phone = $hotel->phone ?? null;
-                        $order->hotel_image = $hotel->main_image ?? null;
+                        $order->city = $hotel?->city ?? null; // fetched from Hotel table
+                        $order->phone = $hotel?->phone ?? null;
+                        $order->hotel_image = $hotel?->main_image ?? null;
                     }
-                    elseif($order->type == 'attraction' && !empty($orderData) && isset($orderData[0]['AttractionId'])){
-                        $attractionId = $orderData[0]['AttractionId'];
-                        $attraction = Attraction::select('location', 'master_image')
+                    elseif($order->type == 'attraction' && !empty($orderData) && (isset($orderData[0]['AttractionId']) || isset($orderData[0]['attraction_id']))){
+                        $attractionId = $orderData[0]['AttractionId'] ?? $orderData[0]['attraction_id'];
+                        $attraction = Attraction::select('location', 'master_image', 'phone')
                                     ->where('attraction_id', $attractionId)
                                     ->first();
-                        $order->city = $attraction->location ?? null;
-                        $order->phone = $attraction->phone ?? null;
-                        $order->attraction_image = $attraction->master_image ?? null;
+                        $order->city = $attraction?->location ?? null;
+                        $order->phone = $attraction?->phone ?? null;
+                        // Prefer uploaded files from orders.upload_files; fall back to attraction master image
+                        $uploadFiles = $order->upload_files;
+                        if (is_string($uploadFiles) && $uploadFiles !== '') {
+                            $decodedUploads = json_decode($uploadFiles, true);
+                            $uploadFiles = (json_last_error() === JSON_ERROR_NONE) ? $decodedUploads : $uploadFiles;
+                        }
+                        $order->attraction_image = !empty($uploadFiles) ? $uploadFiles : ($attraction?->master_image ?? null);
                     }
                     elseif(($order->type == 'travel_point' || $order->type == 'entry_port' || $order->type == 'exit_port' || $order->type == 'travel_hourly' || $order->type == 'local_transport') && !empty($orderData)){
                         // Get vehicle_id and driver_id from jobsheet table for this specific order
                         $jobsheet = DB::table('jobsheets')
-                                    ->select('vehicle_id', 'driver_id','comments')
+                                    ->select('vehicle_id', 'driver_id', 'comments', 'current_status')
                                     ->where('order_id', $order->booking_id)
                                     ->where('type', $order->type)
                                     ->first();
@@ -867,15 +1057,15 @@ class AuthController extends Controller
                                 $vehicle = Vehicle::select('city', 'vehicle_name', 'vehicle_type', 'vehicle_model', 'image', 'seating_capacity', 'vehicle_plate_no', 'sharable', 'vehicle_color')
                                             ->where('vehicle_id', $jobsheet->vehicle_id)
                                             ->first();
-                                $order->city = $vehicle->city ?? null;
-                                $order->vehicle_name = $vehicle->vehicle_name ?? null;
-                                $order->vehicle_type = $vehicle->vehicle_type ?? null;
-                                $order->vehicle_model = $vehicle->vehicle_model ?? null;
-                                $order->vehicle_image = $vehicle->image ?? null;
-                                $order->seating_capacity = $vehicle->seating_capacity ?? null;
-                                $order->vehicle_plate_no = $vehicle->vehicle_plate_no ?? null;
-                                $order->sharable = $vehicle->sharable ?? null;
-                                $order->vehicle_color = $vehicle->vehicle_color ?? null;
+                                $order->city = $vehicle?->city ?? null;
+                                $order->vehicle_name = $vehicle?->vehicle_name ?? null;
+                                $order->vehicle_type = $vehicle?->vehicle_type ?? null;
+                                $order->vehicle_model = $vehicle?->vehicle_model ?? null;
+                                $order->vehicle_image = $vehicle?->image ?? null;
+                                $order->seating_capacity = $vehicle?->seating_capacity ?? null;
+                                $order->vehicle_plate_no = $vehicle?->vehicle_plate_no ?? null;
+                                $order->sharable = $vehicle?->sharable ?? null;
+                                $order->vehicle_color = $vehicle?->vehicle_color ?? null;
                             }
                             
                             // Get driver info
@@ -891,21 +1081,23 @@ class AuthController extends Controller
                                 }
                             }
                         }else{
-                            $vehiclesId = $orderData[0]['vehicles_id'];
+                            $vehiclesId = $orderData[0]['vehicles_id'] ?? null;
                             
-                            $vehicles = Vehicle::select('city', 'driver_id', 'vehicle_name', 'vehicle_type', 'vehicle_model', 'image', 'seating_capacity', 'vehicle_plate_no', 'sharable', 'vehicle_color')
+                            $vehicles = $vehiclesId
+                                ? Vehicle::select('city', 'driver_id', 'vehicle_name', 'vehicle_type', 'vehicle_model', 'image', 'seating_capacity', 'vehicle_plate_no', 'sharable', 'vehicle_color')
                                         ->where('vehicle_id', $vehiclesId)
-                                        ->first();
+                                        ->first()
+                                : null;
                             
-                            $order->city = $vehicles->city ?? null;
-                            $order->vehicle_name = $vehicles->vehicle_name ?? null;
-                            $order->vehicle_type = $vehicles->vehicle_type ?? null;
-                            $order->vehicle_model = $vehicles->vehicle_model ?? null;
-                            $order->vehicle_image = $vehicles->image ?? null;
-                            $order->seating_capacity = $vehicles->seating_capacity ?? null;
-                            $order->vehicle_plate_no = $vehicles->vehicle_plate_no ?? null;
-                            $order->sharable = $vehicles->sharable ?? null;
-                            $order->vehicle_color = $vehicles->vehicle_color ?? null;
+                            $order->city = $vehicles?->city ?? null;
+                            $order->vehicle_name = $vehicles?->vehicle_name ?? null;
+                            $order->vehicle_type = $vehicles?->vehicle_type ?? null;
+                            $order->vehicle_model = $vehicles?->vehicle_model ?? null;
+                            $order->vehicle_image = $vehicles?->image ?? null;
+                            $order->seating_capacity = $vehicles?->seating_capacity ?? null;
+                            $order->vehicle_plate_no = $vehicles?->vehicle_plate_no ?? null;
+                            $order->sharable = $vehicles?->sharable ?? null;
+                            $order->vehicle_color = $vehicles?->vehicle_color ?? null;
                             $order->message = null;
                             
                             // Get driver phone and name if driver_id exists
@@ -913,26 +1105,28 @@ class AuthController extends Controller
                                 $driver = Driver::select('phone', 'name', 'wp_number', 'image')
                                             ->where('driver_id', $vehicles->driver_id)
                                             ->first();
-                                $order->driver_phone = $driver->phone ?? null;
-                                $order->driver_name = $driver->name ?? null;
-                                $order->wp_number = $driver->wp_number ?? null;
-                                $order->driver_image = $driver->image ?? null;
+                                $order->driver_phone = $driver?->phone ?? null;
+                                $order->driver_name = $driver?->name ?? null;
+                                $order->wp_number = $driver?->wp_number ?? null;
+                                $order->driver_image = $driver?->image ?? null;
                             }
                         }
+
+                        $order->status = $this->resolveJobsheetStatus($jobsheet);
                     }
                     elseif($order->type == 'restaurant' && !empty($orderData) && isset($orderData[0]['restaurantId'])){
                         $restaurantId = $orderData[0]['restaurantId'];
                         $restaurant = Restaurant::select('city', 'master_image', 'phone')
                                     ->where('restaurant_id', $restaurantId)
                                     ->first();
-                        $order->city = $restaurant->city ?? null;
-                        $order->phone = $restaurant->phone ?? null;
-                        $order->restaurant_image = $restaurant->master_image ?? null;
+                        $order->city = $restaurant?->city ?? null;
+                        $order->phone = $restaurant?->phone ?? null;
+                        $order->restaurant_image = $restaurant?->master_image ?? null;
                     }
                     elseif($order->type == 'guide' && !empty($orderData)){
                         // Get guide_id from jobsheet table for this specific order
                         $jobsheet = DB::table('jobsheets')
-                                    ->select('guide_id', 'comments')
+                                    ->select('guide_id', 'comments', 'current_status')
                                     ->where('order_id', $order->booking_id)
                                     ->where('type', 'guide')
                                     ->first();
@@ -947,7 +1141,7 @@ class AuthController extends Controller
                                 $guide_languages = GuideLanguage::select('language')
                                     ->where('guide_id', $guide->guide_id)
                                     ->get();
-                                $guide_languages = $guide_languages->map(function ($language) {
+                                $guide_languages = $guide_languages->map(function (GuideLanguage $language) {
                                     return $language->language;
                                 });
                                 $order->languages = $guide_languages;
@@ -961,14 +1155,14 @@ class AuthController extends Controller
                         }
                         else if(isset($orderData[0]['guide_id'])){
                             $guideId = $orderData[0]['guide_id'];
-                            $guide = Guide::select('city', 'contact_no', 'name', 'wp_number', 'image')
+                            $guide = Guide::select('guide_id', 'city', 'contact_no', 'name', 'wp_number', 'image')
                                         ->where('guide_id', $guideId)
                                         ->first();
                             if ($guide) {
                                 $guide_languages = GuideLanguage::select('language')
                                     ->where('guide_id', $guide->guide_id)
                                     ->get();
-                                $guide_languages = $guide_languages->map(function ($language) {
+                                $guide_languages = $guide_languages->map(function (GuideLanguage $language) {
                                     return $language->language;
                                 });
                                 $order->languages = $guide_languages;
@@ -980,6 +1174,8 @@ class AuthController extends Controller
                                 $order->guide_image = $guide->image ?? null;
                             }
                         }
+
+                        $order->status = $this->resolveJobsheetStatus($jobsheet);
                     }
                     elseif ($order->type == 'attraction_package' && isset($orderData[0]['package_attraction_id'])) {
                         $packageAttractionId = $orderData[0]['package_attraction_id'];
@@ -996,7 +1192,7 @@ class AuthController extends Controller
                             if (is_array($attractionIds) && count($attractionIds) > 0) {
                                 // Fetch the first attraction to get its city (location)
                                 $firstAttraction = DB::table('attractions')
-                                    ->select('location')
+                                    ->select('location', 'master_image')
                                     ->where('attraction_id', $attractionIds[0])
                                     ->first();
                     
@@ -1004,6 +1200,16 @@ class AuthController extends Controller
                                     // Add the city to order data
                                     $order->city = $firstAttraction->location;
                                 }
+
+                                // Prefer uploaded files from orders.upload_files
+                                $uploadFiles = $order->upload_files;
+                                if (is_string($uploadFiles) && $uploadFiles !== '') {
+                                    $decodedUploads = json_decode($uploadFiles, true);
+                                    $uploadFiles = (json_last_error() === JSON_ERROR_NONE) ? $decodedUploads : $uploadFiles;
+                                }
+                                $order->attraction_image = !empty($uploadFiles)
+                                    ? $uploadFiles
+                                    : ($firstAttraction?->master_image ?? null);
                             }
                         }
                     }
@@ -1012,18 +1218,75 @@ class AuthController extends Controller
                 });
                 
                 // Add orders to tour object
-                $destination = $tour->destination;
-                $country = Country::select('country_image')
-                                    ->where('name', $destination)
-                                    ->first();
-                $tour->destination_image = $country->country_image ?? null;
+                $destinationNames = $this->parseDestinationCountryNames($tour->destination);
+                $destinationImages = [];
+
+                if (!empty($destinationNames)) {
+                    $countries = Country::select('name', 'country_image')
+                        ->whereIn('name', $destinationNames)
+                        ->get()
+                        ->keyBy('name');
+
+                    foreach ($destinationNames as $countryName) {
+                        $destinationImages[$countryName] = $countries->get($countryName)?->country_image ?? null;
+                    }
+                }
+
+                $tour->destination_image = $destinationImages;
                 $tourData = $tour->toArray();
                 $tourData['orders'] = $orders;
                 $tourData['total_orders'] = $orders->count();
-                $tourData['agency_name'] = $agency->agency_name;
-                $tourData['agency_phone'] = $agency->phone;
-                $tourData['agency_email'] = $agency->email;
-                $tourData['agency_wp_number'] = $agency->wp_number;
+                $tourData['agency_data'] = [
+                    'agency_name' => $agency->agency_name ?? null,
+                    'email' => $agency->email ?? null,
+                    'phone' => $agency->phone ?? null,
+                    'country' => $agency->country ?? null,
+                    'city' => $agency->city ?? null,
+                    'address' => $agency->address ?? null,
+                    'postal_code' => $agency->postal_code ?? null,
+                    'branches' => $agency->branches ?? null,
+                    'contact_person' => $agency->contact_person ?? null,
+                    'logo' => $agency->logo ?? null,
+                    'wp_number' => $agency->wp_number ?? null,
+                ];
+                $tourData['dmc_data'] = [
+                    'name' => $dmc->name ?? null,
+                    'email' => $dmc->email ?? null,
+                    'country_code' => $dmc->country_code ?? null,
+                    'phone' => $dmc->phone ?? null,
+                    'salutation' => $dmc->salutation ?? null,
+                    'country' => $dmc->country ?? null,
+                    'company_name' => $dmc->company_name ?? null,
+                    'city' => $dmc->city ?? null,
+                    'address' => $dmc->address ?? null,
+                    'user_country' => $dmc->user_country ?? null,
+                    'profile_image' => $dmc->profile_image ?? null,
+                ];
+
+                if ($includeAirportDetails) {
+                    $tourData['Entry_Airport'] = [];
+                    $tourData['Exit_Airport'] = [];
+
+                    foreach ($orders as $order) {
+                        $orderData = is_array($order->data) ? $order->data : json_decode($order->data, true);
+                        $dataRow = (is_array($orderData) && isset($orderData[0])) ? $orderData[0] : null;
+
+                        if ($order->type === 'entry_port') {
+                            $tourData['Entry_Airport'][] = [
+                                'arrival_transport_type' => $dataRow !== null ? ($dataRow['arrival_transport_type'] ?? null) : null,
+                                'arrival_flight_no' => $dataRow !== null ? ($dataRow['arrival_flight_no'] ?? null) : null,
+                            ];
+                        }
+
+                        if ($order->type === 'exit_port') {
+                            $tourData['Exit_Airport'][] = [
+                                'departure_transport_type' => $dataRow !== null ? ($dataRow['departure_transport_type'] ?? null) : null,
+                                'departure_flight_no' => $dataRow !== null ? ($dataRow['departure_flight_no'] ?? null) : null,
+                            ];
+                        }
+                    }
+                }
+
                 return $tourData;
             });
             
@@ -1206,6 +1469,108 @@ class AuthController extends Controller
         }
     }
 
+    function updateAgent(Request $request)
+    {
+        try {
+            $request->validate([
+                'agent_id' => 'required',
+                'current_password' => 'nullable',
+                'app_password' => 'nullable',
+                'profile_image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
+            ]);
+
+            $agent = $request->agent;
+            if ((int) $agent->agent_id !== (int) $request->agent_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized',
+                ], 403);
+            }
+
+            if ($request->filled('app_password')) {
+                if (!$this->passwordMatches($request->current_password, $agent->password)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Incorrect current password',
+                    ], 403);
+                }
+                $agent->password = $request->app_password;
+            }
+
+            if ($request->hasFile('profile_image')) {
+                $pathData = CommonHelper::image_path('file_storage', $request->file('profile_image'));
+                if (!empty($pathData['master_value'])) {
+                    $agent->agent_image = $pathData['master_value'];
+                }
+            }
+
+            $agent->save();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Agent updated successfully',
+                'data' => $agent->refresh()
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error updating agent. ' . $e->getMessage(),
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    function updateDmc(Request $request)
+    {
+        try {
+            $request->validate([
+                'user_id' => 'required',
+                'current_password' => 'nullable',
+                'app_password' => 'nullable',
+                'profile_image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
+            ]);
+
+            $dmc = $request->dmc;
+            if ((int) $dmc->userId !== (int) $request->user_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized',
+                ], 403);
+            }
+
+            if ($request->filled('app_password')) {
+                if (!$this->passwordMatches($request->current_password, $dmc->password)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Incorrect current password',
+                    ], 403);
+                }
+                $dmc->password = $request->app_password;
+            }
+
+            if ($request->hasFile('profile_image')) {
+                $pathData = CommonHelper::image_path('file_storage', $request->file('profile_image'));
+                if (!empty($pathData['master_value'])) {
+                    $dmc->profile_image = $pathData['master_value'];
+                }
+            }
+
+            $dmc->save();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'DMC updated successfully',
+                'data' => $dmc->refresh()
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error updating DMC. ' . $e->getMessage(),
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
     public function updateJobsheetStatus(Request $request)
     {
         try {
@@ -1229,12 +1594,20 @@ class AuthController extends Controller
             
             // Query guests where tour_id array contains the jobsheet's tour_id
             // Handle both JSON array and direct value cases
-            $guestEmails = Guest::where(function($query) use ($tour_id) {
+            $guestEmails = Guest::where(function (Builder $query) use ($tour_id) {
                 // If tour_id is stored as JSON array, check if it contains the value
                 $query->whereJsonContains('tour_id', $tour_id)
+                    ->orWhereJsonContains('tour_id', (string) $tour_id)
                     // Also handle direct value match (in case some records have single value)
                     ->orWhere('tour_id', $tour_id);
-            })->pluck('email')->unique()->toArray();
+            })->pluck('email')->filter()->unique()->values()->toArray();
+
+            Log::info('updateJobsheetStatus guest lookup', [
+                'jobsheet_id' => $request->id,
+                'tour_id' => $tour_id,
+                'guest_email_count' => count($guestEmails),
+                'guest_emails' => $guestEmails,
+            ]);
             // Define status mapping based on jobsheet type
             $driverStatusMap = [
                 1 => 'started',
@@ -1323,7 +1696,7 @@ class AuthController extends Controller
                 $commentsDecoded = json_decode($jobsheet->comments, true);
                 $commentsText = '';
                 if (is_array($commentsDecoded)) {
-                    $commentsText = implode(', ', array_map(function ($c) {
+                    $commentsText = implode(', ', array_map(function (mixed $c) {
                         return is_array($c) ? json_encode($c) : (string)$c;
                     }, $commentsDecoded));
                 } elseif (is_string($commentsDecoded)) {
@@ -1450,6 +1823,11 @@ class AuthController extends Controller
                 );
 
                 Log::info('Notification sent to guests', ['result' => $notificationResult]);
+            } else {
+                Log::info('Notification skipped: no guest emails found for tour', [
+                    'jobsheet_id' => $request->id,
+                    'tour_id' => $tour_id,
+                ]);
             }
 
             return response()->json([
@@ -1470,7 +1848,9 @@ class AuthController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+
     }
+      
 
     /**
      * Logout function for all user types - receives user_type from frontend
@@ -1523,6 +1903,199 @@ class AuthController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Validate a Sanctum personal access token for driver/guide/guest/restaurant/dmc/agent.
+     * Expects exactly one ID field plus token.
+     */
+    public function validateToken(Request $request)
+    {
+        try {
+            $identifierMap = [
+                'driver_id' => 'driver-token',
+                'driverid' => 'driver-token',
+                'guide_id' => 'guide-token',
+                'guideid' => 'guide-token',
+                'guest_id' => 'guest-token',
+                'guestid' => 'guest-token',
+                'restaurant_id' => 'restaurant-token',
+                'restaurantid' => 'restaurant-token',
+                'dmc_id' => 'dmc-token',
+                'dmcid' => 'dmc-token',
+                'agent_id' => 'agent-token',
+                'agentid' => 'agent-token',
+            ];
+
+            $filledIdentifiers = [];
+            foreach ($identifierMap as $param => $tokenName) {
+                if ($request->filled($param)) {
+                    $filledIdentifiers[$param] = $tokenName;
+                }
+            }
+
+            if (count($filledIdentifiers) !== 1) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Provide exactly one of: driver_id, guide_id, guest_id, restaurant_id, dmc_id, agent_id.',
+                ], 422);
+            }
+
+            $request->validate([
+                'token' => 'required|string',
+            ]);
+
+            $paramKey = array_key_first($filledIdentifiers);
+            $tokenName = $filledIdentifiers[$paramKey];
+            $tokenableId = (int) $request->input($paramKey);
+            $plainToken = trim((string) $request->input('token'));
+
+            // For DMC, clients may send dmcId; personal_access_tokens.tokenable_id stores users.userId.
+            if (in_array($paramKey, ['dmc_id', 'dmcid'], true)) {
+                $dmcUser = User::query()
+                    ->select('userId')
+                    ->where(function (Builder $query) use ($tokenableId) {
+                        $query->where('userId', $tokenableId)
+                            ->orWhere('dmcId', $tokenableId);
+                    })
+                    ->first();
+
+                if (!$dmcUser) {
+                    return response()->json([
+                        'success' => false,
+                        'valid' => false,
+                        'expired' => false,
+                        'message' => 'DMC not found for the provided id.',
+                    ], 404);
+                }
+
+                $tokenableId = (int) $dmcUser->userId;
+            }
+
+            $tokenHash = $this->hashSanctumToken($plainToken);
+
+            $tokenRows = DB::table('personal_access_tokens')
+                ->where('name', $tokenName)
+                ->where('tokenable_id', $tokenableId)
+                ->get();
+
+            if ($tokenRows->isEmpty()) {
+                return response()->json([
+                    'success' => false,
+                    'valid' => false,
+                    'expired' => false,
+                    'message' => 'No token session found for the provided id and type.',
+                    'data' => [
+                        'type' => $tokenName,
+                        'id' => (int) $request->input($paramKey),
+                    ],
+                ], 404);
+            }
+
+            $matchedToken = $tokenRows->first(function (object $row) use ($tokenHash, $plainToken) {
+                if (!is_string($row->token) || $row->token === '') {
+                    return false;
+                }
+
+                if (hash_equals($row->token, $tokenHash)) {
+                    return true;
+                }
+
+                // Also allow matching if client sent already-hashed token value.
+                return hash_equals($row->token, $plainToken);
+            });
+
+            if (!$matchedToken) {
+                return response()->json([
+                    'success' => false,
+                    'valid' => false,
+                    'expired' => false,
+                    'message' => 'Token does not match for the provided id.',
+                    'data' => [
+                        'type' => $tokenName,
+                        'id' => (int) $request->input($paramKey),
+                    ],
+                ], 401);
+            }
+
+            $isExpired = false;
+            if (!empty($matchedToken->expires_at)) {
+                $isExpired = now()->greaterThan($matchedToken->expires_at);
+            }
+
+            // Sanctum config expiration (minutes) can also invalidate tokens.
+            $sanctumExpirationMinutes = config('sanctum.expiration');
+            if (!$isExpired && !empty($sanctumExpirationMinutes)) {
+                $createdAt = $matchedToken->created_at ?? null;
+                if ($createdAt) {
+                    $isExpired = now()->greaterThan(
+                        \Carbon\Carbon::parse($createdAt)->addMinutes((int) $sanctumExpirationMinutes)
+                    );
+                }
+            }
+
+            if ($isExpired) {
+                return response()->json([
+                    'success' => false,
+                    'valid' => false,
+                    'expired' => true,
+                    'message' => 'Token session has expired.',
+                    'data' => [
+                        'type' => $tokenName,
+                        'id' => (int) $request->input($paramKey),
+                        'token_id' => $matchedToken->id,
+                        'expires_at' => $matchedToken->expires_at,
+                        'last_used_at' => $matchedToken->last_used_at,
+                    ],
+                ], 401);
+            }
+
+            return response()->json([
+                'success' => true,
+                'valid' => true,
+                'expired' => false,
+                'message' => 'Token is valid.',
+                'data' => [
+                    'type' => $tokenName,
+                    'id' => (int) $request->input($paramKey),
+                    'token_id' => $matchedToken->id,
+                    'name' => $matchedToken->name,
+                    'tokenable_id' => $matchedToken->tokenable_id,
+                    'expires_at' => $matchedToken->expires_at,
+                    'last_used_at' => $matchedToken->last_used_at,
+                    'created_at' => $matchedToken->created_at,
+                ],
+            ], 200);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'valid' => false,
+                'message' => 'Validation failed.',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'valid' => false,
+                'message' => 'Error validating token. ' . $e->getMessage(),
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Hash a Sanctum plain-text token the same way Sanctum stores it.
+     * Supports both "id|plain" and raw plain token formats.
+     */
+    private function hashSanctumToken(string $token): string
+    {
+        if (str_contains($token, '|')) {
+            [, $plain] = explode('|', $token, 2);
+
+            return hash('sha256', $plain);
+        }
+
+        return hash('sha256', $token);
     }
 
     public function deleteAccount(Request $request)
@@ -1642,7 +2215,20 @@ class AuthController extends Controller
     public function exploreCities(Request $request){
         $country = $request->country;
         $city = $request->city;
-        $cityData = City::select('city_id', 'name', 'image')->where('country', $country)->first();
+
+        $cityQuery = City::select('city_id', 'name', 'image')->where('country', $country);
+        if (!empty($city)) {
+            $cityQuery->whereRaw('LOWER(name) = ?', [strtolower(trim($city))]);
+        }
+        $cityData = $cityQuery->first();
+
+        if (!$cityData) {
+            return response()->json([
+                'success' => false,
+                'message' => 'City not found',
+            ], 404);
+        }
+
         $city_exploration = CityExploration::where('city_id', $cityData->city_id)->first();
         if(!$city_exploration){
             return response()->json([
@@ -1687,7 +2273,7 @@ class AuthController extends Controller
                 $jobsheets = Jobsheet::select('jobsheet_id', 'driver_id', 'tour_id', 'order_id', 'vehicle_id', 'current_status','date', 'data', 'type', 'service_type', 'journey_time','driver_id')->whereNotNull('driver_id')
                     ->where('date', '=', $dateToFilter)
                     ->where('driver_id', $driver_id)
-                    ->whereHas('tour', function($query) {
+                    ->whereHas('tour', function (Builder $query) {
                         $query->whereIn('tour_status', ['Confirmed', 'Definite', 'Actual']);
                     })
                     ->get();
@@ -1697,13 +2283,15 @@ class AuthController extends Controller
                     ->values();
     
                 // Add vehicle information to each jobsheet
-                $jobsheetsWithVehicles = $jobsheets->map(function ($jobsheet) {
+                $jobsheetsWithVehicles = $jobsheets->map(function (Jobsheet $jobsheet) {
                     $jobsheetData = $jobsheet->toArray();
                     
                     // Get order data if order_id exists
                     if ($jobsheet->order_id) {
                         $order = Order::select('data', 'tour_id')->where('booking_id', $jobsheet->order_id)->first();
-                        $tour = Tour::select('tour_id', 'display_id', 'infant')->where('tour_id', $order->tour_id)->first();
+                        $tour = $order
+                            ? Tour::select('tour_id', 'display_id', 'infant')->where('tour_id', $order->tour_id)->first()
+                            : null;
                         
                         if ($order && $order->data) {
                             $orderData = is_string($order->data) ? json_decode($order->data, true) : $order->data;
@@ -1725,7 +2313,7 @@ class AuthController extends Controller
                                     'selectedHours' => $data['selectedHours'] ?? null,
                                     'adults' => $data['adults'] ?? null,
                                     'children' => $data['children'] ?? null,
-                                    'infant' => $tour->infant ?? null,
+                                    'infant' => $tour?->infant ?? null,
                                     'distance' => $data['distance'] ?? null,
                                     'Night_Start_Time' => $data['Night_Start_Time'] ?? null,
                                     'Night_End_Time' => $data['Night_End_Time'] ?? null,
@@ -1764,9 +2352,12 @@ class AuthController extends Controller
                 $customer_info = [];
                 foreach($tourIds as $tourId){
                     $firstOrder = Order::select('data')->where('tour_id', $tourId)->first();
-                    $orderData = is_string($firstOrder->data) ? json_decode($firstOrder->data, true) : $firstOrder->data;
+                    $orderData = $firstOrder && $firstOrder->data
+                        ? (is_string($firstOrder->data) ? json_decode($firstOrder->data, true) : $firstOrder->data)
+                        : null;
                     if($orderData && isset($orderData[0])){
                         $share_status = null; // default
+                        $guest_whatsapp_no = null;
                         if (!empty($orderData[0]['email'])) {
                             $guest = Guest::whereJsonContains('tour_id', $tourId)
                                 ->where('email', $orderData[0]['email'])
@@ -1832,13 +2423,13 @@ class AuthController extends Controller
                 // Only include jobsheets where tour_status is Confirmed, Definite, or Actual
                 $jobsheets = Jobsheet::select('jobsheet_id', 'tour_id', 'order_id', 'current_status','date', 'data', 'type', 'service_type', 'journey_time', 'guide_id')->whereNotNull('guide_id')
                     ->where('guide_id', $guide_id)->where('date', '=', $dateToFilter)
-                    ->whereHas('tour', function($query) {
+                    ->whereHas('tour', function (Builder $query) {
                         $query->whereIn('tour_status', ['Confirmed', 'Definite', 'Actual']);
                     })
                     ->get();
     
                 // Add vehicle information and order details to each jobsheet
-                $guideJobsheets = $jobsheets->map(function ($jobsheet) {
+                $guideJobsheets = $jobsheets->map(function (Jobsheet $jobsheet) {
                     $jobsheetData = $jobsheet->toArray();
                     
                     // Get order data if order_id exists
@@ -1846,7 +2437,9 @@ class AuthController extends Controller
                         $order = Order::select('data', 'tour_id')
                             ->where('booking_id', $jobsheet->order_id)
                             ->first();
-                        $tour = Tour::select('tour_id', 'display_id', 'infant')->where('tour_id', $order->tour_id)->first();
+                        $tour = $order
+                            ? Tour::select('tour_id', 'display_id', 'infant')->where('tour_id', $order->tour_id)->first()
+                            : null;
                         
                         if ($order && $order->data) {
                             $orderData = is_string($order->data) ? json_decode($order->data, true) : $order->data;
@@ -1862,7 +2455,7 @@ class AuthController extends Controller
                                     'entrytime' => $data['entrytime'] ?? null,
                                     'adults' => $data['adults'] ?? null,
                                     'children' => $data['children'] ?? null,
-                                    'infant' => $tour->infant ?? null,
+                                    'infant' => $tour?->infant ?? null,
                                     'hours' => $data['hours'] ?? null,
 
                                 ];
@@ -1883,9 +2476,12 @@ class AuthController extends Controller
                 $customer_info = [];
                 foreach($tourIds as $tourId){
                     $firstOrder = Order::select('data')->where('tour_id', $tourId)->first();
-                    $orderData = is_string($firstOrder->data) ? json_decode($firstOrder->data, true) : $firstOrder->data;
+                    $orderData = $firstOrder && $firstOrder->data
+                        ? (is_string($firstOrder->data) ? json_decode($firstOrder->data, true) : $firstOrder->data)
+                        : null;
                     if($orderData && isset($orderData[0])){
                         $share_status = null; // default
+                        $guest_whatsapp_no = null;
     
                         if (!empty($orderData[0]['email'])) {
                             $guest = Guest::whereJsonContains('tour_id', $tourId)
@@ -1896,13 +2492,13 @@ class AuthController extends Controller
                             $guest_whatsapp_no = $guest?->whatsapp_no;
                         }
                         $customer_info[$tourId] = [
-                            'name' => $orderData[0]['fullName'],
-                            'email' => $orderData[0]['email'],
+                            'name' => $orderData[0]['fullName'] ?? '',
+                            'email' => $orderData[0]['email'] ?? '',
                             'isContactShared' => $share_status,
-                            'phone' => $share_status == 1 ? $orderData[0]['phone'] : 'Not Shared',
-                            'address' => $orderData[0]['address1'],
-                            'state' => $orderData[0]['state'],
-                            'zip' => $orderData[0]['zip'],
+                            'phone' => $share_status == 1 ? ($orderData[0]['phone'] ?? '') : 'Not Shared',
+                            'address' => $orderData[0]['address1'] ?? '',
+                            'state' => $orderData[0]['state'] ?? '',
+                            'zip' => $orderData[0]['zip'] ?? '',
                             'whatsapp_no' => $guest_whatsapp_no ?? ''
                         ];
                     }
@@ -1929,5 +2525,340 @@ class AuthController extends Controller
                 ], 500);
             }
         }
+    }
+
+    /**
+     * @return array{arrival_transport_type: mixed, arrival_flight_no: mixed}
+     */
+    private function getEntryPortArrivalFieldsForTour(int|string $tourId): array
+    {
+        $order = Order::query()
+            ->select('data')
+            ->where('tour_id', $tourId)
+            ->whereRaw('LOWER(type) = ?', ['entry_port'])
+            ->first();
+
+        return $this->extractEntryPortArrivalFieldsFromOrderData($order?->data);
+    }
+
+    /**
+     * Resolve entry_port arrival fields via today's jobsheet order_id → orders.booking_id.
+     *
+     * @return array{arrival_transport_type: mixed, arrival_flight_no: mixed}
+     */
+    private function getEntryPortArrivalFieldsForTourFromJobsheet(int|string $tourId, ?string $date = null): array
+    {
+        $date = $date ?? today()->toDateString();
+
+        $entryPortJobsheet = Jobsheet::query()
+            ->select('order_id')
+            ->where('tour_id', $tourId)
+            ->whereDate('date', $date)
+            ->whereRaw('LOWER(type) = ?', ['entry_port'])
+            ->whereNotNull('order_id')
+            ->first();
+
+        if ($entryPortJobsheet) {
+            $fields = $this->getEntryPortArrivalFieldsFromBookingId($entryPortJobsheet->order_id);
+            if ($fields['arrival_transport_type'] !== null || $fields['arrival_flight_no'] !== null) {
+                return $fields;
+            }
+        }
+
+        return $this->getEntryPortArrivalFieldsForTour($tourId);
+    }
+
+    /**
+     * @return array{arrival_transport_type: null, arrival_flight_no: null}
+     */
+    private function nullArrivalFields(): array
+    {
+        return [
+            'arrival_transport_type' => null,
+            'arrival_flight_no' => null,
+        ];
+    }
+
+    /**
+     * @return array{departure_transport_type: null, departure_flight_no: null}
+     */
+    private function nullDepartureFields(): array
+    {
+        return [
+            'departure_transport_type' => null,
+            'departure_flight_no' => null,
+        ];
+    }
+
+    /**
+     * @return array{arrival_transport_type: mixed, arrival_flight_no: mixed}
+     */
+    private function getEntryPortArrivalFieldsFromBookingId(mixed $bookingId): array
+    {
+        if ($bookingId === null || $bookingId === '') {
+            return [
+                'arrival_transport_type' => null,
+                'arrival_flight_no' => null,
+            ];
+        }
+
+        $order = $this->findOrderByBookingId($bookingId);
+
+        return $this->extractEntryPortArrivalFieldsFromOrderData($order?->data);
+    }
+
+    private function findOrderByBookingId(mixed $bookingId): ?Order
+    {
+        $candidates = array_values(array_unique(array_filter([
+            $bookingId,
+            is_scalar($bookingId) ? (string) $bookingId : null,
+            is_numeric($bookingId) ? (int) $bookingId : null,
+        ], fn (mixed $value) => $value !== null && $value !== '')));
+
+        return Order::query()
+            ->select('data')
+            ->whereIn('booking_id', $candidates)
+            ->first();
+    }
+
+    /**
+     * @return array{arrival_transport_type: mixed, arrival_flight_no: mixed}
+     */
+    private function extractEntryPortArrivalFieldsFromOrderData(mixed $orderData): array
+    {
+        $dataRow = $this->decodeOrderDataFirstRow($orderData);
+
+        return [
+            'arrival_transport_type' => $dataRow !== null ? ($dataRow['arrival_transport_type'] ?? null) : null,
+            'arrival_flight_no' => $dataRow !== null ? ($dataRow['arrival_flight_no'] ?? null) : null,
+        ];
+    }
+
+    /**
+     * @return array{departure_transport_type: mixed, departure_flight_no: mixed}
+     */
+    private function getExitPortDepartureFieldsForTour(int|string $tourId): array
+    {
+        $order = Order::query()
+            ->select('data')
+            ->where('tour_id', $tourId)
+            ->whereRaw('LOWER(type) = ?', ['exit_port'])
+            ->first();
+
+        return $this->extractExitPortDepartureFieldsFromOrderData($order?->data);
+    }
+
+    /**
+     * @return array{departure_transport_type: mixed, departure_flight_no: mixed}
+     */
+    private function getExitPortDepartureFieldsForTourFromJobsheet(int|string $tourId, ?string $date = null): array
+    {
+        $date = $date ?? today()->toDateString();
+
+        $exitPortJobsheet = Jobsheet::query()
+            ->select('order_id')
+            ->where('tour_id', $tourId)
+            ->whereDate('date', $date)
+            ->whereRaw('LOWER(type) = ?', ['exit_port'])
+            ->whereNotNull('order_id')
+            ->first();
+
+        if ($exitPortJobsheet) {
+            $fields = $this->getExitPortDepartureFieldsFromBookingId($exitPortJobsheet->order_id);
+            if ($fields['departure_transport_type'] !== null || $fields['departure_flight_no'] !== null) {
+                return $fields;
+            }
+        }
+
+        return $this->getExitPortDepartureFieldsForTour($tourId);
+    }
+
+    /**
+     * @return array{departure_transport_type: mixed, departure_flight_no: mixed}
+     */
+    private function getExitPortDepartureFieldsFromBookingId(mixed $bookingId): array
+    {
+        if ($bookingId === null || $bookingId === '') {
+            return [
+                'departure_transport_type' => null,
+                'departure_flight_no' => null,
+            ];
+        }
+
+        $order = $this->findOrderByBookingId($bookingId);
+
+        return $this->extractExitPortDepartureFieldsFromOrderData($order?->data);
+    }
+
+    /**
+     * @return array{departure_transport_type: mixed, departure_flight_no: mixed}
+     */
+    private function extractExitPortDepartureFieldsFromOrderData(mixed $orderData): array
+    {
+        $dataRow = $this->decodeOrderDataFirstRow($orderData);
+
+        return [
+            'departure_transport_type' => $dataRow !== null ? ($dataRow['departure_transport_type'] ?? null) : null,
+            'departure_flight_no' => $dataRow !== null ? ($dataRow['departure_flight_no'] ?? null) : null,
+        ];
+    }
+
+    private function resolveJobsheetStatus(?object $jobsheet): int
+    {
+        if ($jobsheet === null || $jobsheet->current_status === null || $jobsheet->current_status === '') {
+            return 1;
+        }
+
+        return (int) $jobsheet->current_status;
+    }
+
+    /**
+     * Parse tour destination into a list of country names.
+     * Supports array, JSON array string, or comma-separated string.
+     *
+     * @return array<int, string>
+     */
+    private function parseDestinationCountryNames(mixed $destination): array
+    {
+        if ($destination === null || $destination === '') {
+            return [];
+        }
+
+        if (is_array($destination)) {
+            $names = $destination;
+        } elseif (is_string($destination)) {
+            $trimmed = trim($destination);
+            $decoded = json_decode($trimmed, true);
+
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                $names = $decoded;
+            } else {
+                $names = preg_split('/\s*,\s*/', $trimmed) ?: [];
+            }
+        } else {
+            return [];
+        }
+
+        $names = array_values(array_unique(array_filter(array_map(function (mixed $name) {
+            return is_string($name) ? trim($name) : '';
+        }, $names), fn (mixed $name) => $name !== '')));
+
+        return $names;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function decodeOrderDataFirstRow(mixed $orderData): ?array
+    {
+        if ($orderData === null) {
+            return null;
+        }
+
+        $decoded = is_string($orderData) ? json_decode($orderData, true) : $orderData;
+
+        if (!is_array($decoded)) {
+            return null;
+        }
+
+        if (isset($decoded[0]) && is_array($decoded[0])) {
+            return $decoded[0];
+        }
+
+        if (
+            array_key_exists('arrival_transport_type', $decoded)
+            || array_key_exists('arrival_flight_no', $decoded)
+            || array_key_exists('departure_transport_type', $decoded)
+            || array_key_exists('departure_flight_no', $decoded)
+        ) {
+            return $decoded;
+        }
+
+        return null;
+    }
+
+    private function orderDataHasCustomerFields(array $data): bool
+    {
+        return !empty($data['fullName'])
+            || !empty($data['email'])
+            || !empty($data['phone'])
+            || !empty($data['address1']);
+    }
+
+    /**
+     * @return array{name: ?string, email: ?string, phone: ?string, address: ?string, state: ?string, zip: ?string}|null
+     */
+    private function resolveCustomerFieldsFromTour(int|string $tourId): ?array
+    {
+        $tour = Tour::query()
+            ->select('mainguest', 'additionalguest')
+            ->where('tour_id', $tourId)
+            ->first();
+
+        if (!$tour) {
+            return null;
+        }
+
+        $mainGuest = $this->decodeTourJsonField($tour->mainguest);
+        if (is_array($mainGuest) && $this->tourMainGuestHasCustomerFields($mainGuest)) {
+            return [
+                'name' => $this->formatGuestName($mainGuest['salutation'] ?? null, $mainGuest['full_name'] ?? null),
+                'email' => $mainGuest['email'] ?? null,
+                'phone' => $mainGuest['phone'] ?? null,
+                'address' => $mainGuest['address1'] ?? null,
+                'state' => $mainGuest['state'] ?? null,
+                'zip' => $mainGuest['zip'] ?? null,
+            ];
+        }
+
+        $additionalGuests = $this->decodeTourJsonField($tour->additionalguest);
+        if (is_array($additionalGuests) && isset($additionalGuests[0]) && is_array($additionalGuests[0])) {
+            $guest = $additionalGuests[0];
+
+            return [
+                'name' => $this->formatGuestName($guest['salutation'] ?? null, $guest['name'] ?? null),
+                'email' => null,
+                'phone' => $guest['contact_no'] ?? null,
+                'address' => null,
+                'state' => null,
+                'zip' => null,
+            ];
+        }
+
+        return null;
+    }
+
+    private function tourMainGuestHasCustomerFields(array $mainGuest): bool
+    {
+        return !empty($mainGuest['full_name'])
+            || !empty($mainGuest['email'])
+            || !empty($mainGuest['phone'])
+            || !empty($mainGuest['address1']);
+    }
+
+    private function decodeTourJsonField(mixed $value): mixed
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (is_array($value)) {
+            return $value;
+        }
+
+        if (!is_string($value)) {
+            return null;
+        }
+
+        $decoded = json_decode($value, true);
+
+        return json_last_error() === JSON_ERROR_NONE ? $decoded : null;
+    }
+
+    private function formatGuestName(?string $salutation, ?string $name): ?string
+    {
+        $formattedName = trim(trim((string) $salutation) . ' ' . trim((string) $name));
+
+        return $formattedName !== '' ? $formattedName : null;
     }
 }

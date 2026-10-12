@@ -20,6 +20,16 @@ class Guest extends Model
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
         'deleted_at' => 'datetime',
+        'tour_id' => 'array',
+        'passport_exp' => 'date',
+        'date_of_birth' => 'date',
+        'passport_issue_date' => 'date',
+        'passport_expiry_date' => 'date',
+        'payment_passport_details' => 'array',
+        'government_approved_id' => 'array',
+        'room_preference' => 'array',
+        'personalization' => 'array',
+        'uploaded_images' => 'array',
     ];
 
     /**

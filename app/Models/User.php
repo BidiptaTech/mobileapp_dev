@@ -9,6 +9,7 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 use Spatie\Permission\Traits\HasRoles;
+use App\Models\Permission;
 use App\Models\Role;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -31,7 +32,6 @@ class User extends Authenticatable
      *
      * @var array<int, string>
      */
-    use HasFactory;
     protected $table = 'users'; 
     protected $guarded = []; 
 
@@ -129,7 +129,7 @@ class User extends Authenticatable
             '257' => 'Burundi (257)',
             '855' => 'Cambodia (855)',
             '237' => 'Cameroon (237)',
-            '1' => 'Canada (1)',
+            '1' => 'Canada / United States (1)',
             '238' => 'Cape Verde (238)',
             '236' => 'Central African Republic (236)',
             '235' => 'Chad (235)',
@@ -169,7 +169,7 @@ class User extends Authenticatable
             '1-876' => 'Jamaica (1-876)',
             '81' => 'Japan (81)',
             '962' => 'Jordan (962)',
-            '7' => 'Kazakhstan (7)',
+            '7' => 'Kazakhstan / Russia (7)',
             '254' => 'Kenya (254)',
             '965' => 'Kuwait (965)',
             '996' => 'Kyrgyzstan (996)',
@@ -199,7 +199,6 @@ class User extends Authenticatable
             '351' => 'Portugal (351)',
             '974' => 'Qatar (974)',
             '40' => 'Romania (40)',
-            '7' => 'Russia (7)',
             '966' => 'Saudi Arabia (966)',
             '65' => 'Singapore (65)',
             '27' => 'South Africa (27)',
@@ -214,7 +213,6 @@ class User extends Authenticatable
             '380' => 'Ukraine (380)',
             '971' => 'United Arab Emirates (971)',
             '44' => 'United Kingdom (44)',
-            '1' => 'United States (1)',
             '598' => 'Uruguay (598)',
             '58' => 'Venezuela (58)',
             '84' => 'Vietnam (84)',
@@ -223,7 +221,7 @@ class User extends Authenticatable
 
 
     //get dial code 
-    public static function dialCodeToCountryCode($dialCode)
+    public static function dialCodeToCountryCode(string $dialCode)
     {
         $mapping = [
             '93' => 'AF', // Afghanistan
@@ -255,7 +253,7 @@ class User extends Authenticatable
             '257' => 'BI', // Burundi
             '855' => 'KH', // Cambodia
             '237' => 'CM', // Cameroon
-            '1' => 'CA', // Canada
+            '1' => 'US', // Canada and United States share dial code 1
             '238' => 'CV', // Cape Verde
             '236' => 'CF', // Central African Republic
             '235' => 'TD', // Chad
@@ -295,7 +293,7 @@ class User extends Authenticatable
             '1-876' => 'JM', // Jamaica
             '81' => 'JP', // Japan
             '962' => 'JO', // Jordan
-            '7' => 'KZ', // Kazakhstan
+            '7' => 'RU', // Kazakhstan and Russia share dial code 7
             '254' => 'KE', // Kenya
             '965' => 'KW', // Kuwait
             '996' => 'KG', // Kyrgyzstan
@@ -325,7 +323,6 @@ class User extends Authenticatable
             '351' => 'PT', // Portugal
             '974' => 'QA', // Qatar
             '40' => 'RO', // Romania
-            '7' => 'RU', // Russia
             '966' => 'SA', // Saudi Arabia
             '65' => 'SG', // Singapore
             '27' => 'ZA', // South Africa
@@ -340,7 +337,6 @@ class User extends Authenticatable
             '380' => 'UA', // Ukraine
             '971' => 'AE', // United Arab Emirates
             '44' => 'GB', // United Kingdom
-            '1' => 'US', // United States
             '598' => 'UY', // Uruguay
             '58' => 'VE', // Venezuela
             '84' => 'VN', // Vietnam
@@ -359,7 +355,7 @@ class User extends Authenticatable
         return $this->belongsTo(Role::class,'role_id', 'role_id');    
     }
 
-    public function hasPermission($permissionId)
+    public function hasPermission(int|string $permissionId)
     {
         $permission = Permission::find($permissionId);
         if (!$permission) {

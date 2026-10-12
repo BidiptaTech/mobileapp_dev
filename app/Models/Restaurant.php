@@ -53,7 +53,7 @@ class Restaurant extends Model
     /**
      * Add a DMC ID to the dmc_id array
      */
-    public function addDmcId($dmcId)
+    public function addDmcId(int|string $dmcId)
     {
         $dmcIds = $this->getDmcIdsArray();
         if (!in_array($dmcId, $dmcIds)) {
@@ -67,10 +67,10 @@ class Restaurant extends Model
     /**
      * Remove a DMC ID from the dmc_id array
      */
-    public function removeDmcId($dmcId)
+    public function removeDmcId(int|string $dmcId)
     {
         $dmcIds = $this->getDmcIdsArray();
-        $dmcIds = array_values(array_filter($dmcIds, function($id) use ($dmcId) {
+        $dmcIds = array_values(array_filter($dmcIds, function (mixed $id) use ($dmcId) {
             return $id != $dmcId;
         }));
         $this->dmc_id = $dmcIds;
@@ -81,7 +81,7 @@ class Restaurant extends Model
     /**
      * Check if a DMC has selected this restaurant
      */
-    public function hasSelectedByDmc($dmcId)
+    public function hasSelectedByDmc(int|string $dmcId)
     {
         $dmcIds = $this->getDmcIdsArray();
         return in_array($dmcId, $dmcIds);
@@ -127,7 +127,7 @@ class Restaurant extends Model
     /**
      * Get zone assignment for a specific DMC
      */
-    public function getZoneForDmc($dmcId)
+    public function getZoneForDmc(int|string $dmcId)
     {
         $assignments = $this->zone_assignments ?? [];
         
@@ -143,12 +143,12 @@ class Restaurant extends Model
     /**
      * Set zone assignment for a specific DMC
      */
-    public function setZoneForDmc($dmcId, $zoneId = null)
+    public function setZoneForDmc(int|string $dmcId, int|string|null $zoneId = null)
     {
         $assignments = $this->zone_assignments ?? [];
         
         // Remove existing assignment for this DMC
-        $assignments = array_filter($assignments, function($assignment) use ($dmcId) {
+        $assignments = array_filter($assignments, function (mixed $assignment) use ($dmcId) {
             return !isset($assignment['dmc_id']) || $assignment['dmc_id'] != $dmcId;
         });
         
@@ -169,7 +169,7 @@ class Restaurant extends Model
     /**
      * Check if restaurant is assigned to any zone by a specific DMC
      */
-    public function isAssignedToZoneByDmc($dmcId)
+    public function isAssignedToZoneByDmc(int|string $dmcId)
     {
         return !is_null($this->getZoneForDmc($dmcId));
     }
@@ -186,12 +186,12 @@ class Restaurant extends Model
     /**
      * Remove zone assignment for a specific zone (regardless of DMC)
      */
-    public function removeZoneAssignment($zoneId)
+    public function removeZoneAssignment(int|string $zoneId)
     {
         $assignments = $this->zone_assignments ?? [];
         
         // Remove all assignments for the specified zone
-        $assignments = array_filter($assignments, function($assignment) use ($zoneId) {
+        $assignments = array_filter($assignments, function (mixed $assignment) use ($zoneId) {
             return !isset($assignment['zone_id']) || $assignment['zone_id'] != $zoneId;
         });
         
