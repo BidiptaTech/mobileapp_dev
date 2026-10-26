@@ -2,6 +2,7 @@
 
 namespace App\Helpers;
 
+use Illuminate\Support\Facades\Log;
 use Kreait\Firebase\Contract\Database;
 use Kreait\Firebase\Contract\Messaging;
 use Kreait\Firebase\Messaging\CloudMessage;
@@ -19,7 +20,7 @@ class NotificationHelper
      * @param array $data - Optional data payload
      * @return array
      */
-    public static function sendNotificationToGuest($emails, $title, $body, $image = null, $data = [])
+    public static function sendNotificationToGuest(string|array $emails, string $title, string $body, ?string $image = null, array $data = [])
     {
         try {
             $database = app(Database::class);
@@ -47,7 +48,7 @@ class NotificationHelper
                 $deviceData = $snapshot->getValue();
                 
                 // Log the raw data structure for debugging
-                \Log::info('Firebase snapshot data', [
+                Log::info('Firebase snapshot data', [
                     'email' => $email,
                     'encoded_email' => $encodedEmail,
                     'has_data' => !empty($deviceData),
@@ -71,14 +72,14 @@ class NotificationHelper
                     
                     if (!empty($deviceArray['token'])) {
                         $tokens[] = $deviceArray['token'];
-                        \Log::info('Found device token', [
+                        Log::info('Found device token', [
                             'email' => $email,
                             'device_id' => $deviceArray['device_id'] ?? $deviceNodeKey,
                             'platform' => $deviceArray['platform'] ?? 'unknown',
                             'token_length' => strlen($deviceArray['token'])
                         ]);
                     } else {
-                        \Log::warning('Device missing token', [
+                        Log::warning('Device missing token', [
                             'email' => $email,
                             'device_key' => $deviceNodeKey,
                             'device_data' => $deviceArray
@@ -92,7 +93,7 @@ class NotificationHelper
                         'success' => false,
                         'message' => 'No valid tokens found in devices'
                     ];
-                    \Log::warning('No tokens extracted', [
+                    Log::warning('No tokens extracted', [
                         'email' => $email,
                         'device_count' => count($deviceData),
                         'device_keys' => array_keys($deviceData)
@@ -100,7 +101,7 @@ class NotificationHelper
                     continue;
                 }
                 
-                \Log::info('Tokens collected successfully', [
+                Log::info('Tokens collected successfully', [
                     'email' => $email,
                     'total_tokens' => count($tokens),
                     'device_count' => count($deviceData)
@@ -132,12 +133,12 @@ class NotificationHelper
                 }
                 
                 // Log for debugging
-                \Log::info('Preparing to send notification to multiple devices', [
+                Log::info('Preparing to send notification to multiple devices', [
                     'email' => $email,
                     'token_count' => count($tokens),
                     'device_count' => count($deviceData),
                     'data_keys' => array_keys($stringData),
-                    'tokens_preview' => array_map(function($token) {
+                    'tokens_preview' => array_map(function (string $token) {
                         return substr($token, 0, 20) . '...';
                     }, array_slice($tokens, 0, 3)) // Show first 3 tokens (truncated)
                 ]);
@@ -153,7 +154,7 @@ class NotificationHelper
                 
                 foreach ($tokenBatches as $batchIndex => $tokenBatch) {
                     try {
-                        \Log::info('Sending batch', [
+                        Log::info('Sending batch', [
                             'email' => $email,
                             'batch_index' => $batchIndex + 1,
                             'total_batches' => count($tokenBatches),
@@ -166,7 +167,7 @@ class NotificationHelper
                         $totalSuccess += $batchSuccess;
                         $totalFailure += $batchFailure;
                         
-                        \Log::info('Batch sent', [
+                        Log::info('Batch sent', [
                             'email' => $email,
                             'batch_index' => $batchIndex + 1,
                             'success_count' => $batchSuccess,
@@ -192,14 +193,14 @@ class NotificationHelper
                                     foreach ($children as $childKey => $childVal) {
                                         if (isset($childVal['token']) && $childVal['token'] === $tokenToRemove) {
                                             $database->getReference("user_tokens/{$encodedEmail}/{$childKey}")->remove();
-                                            \Log::info('Removed invalid token', ['email' => $email, 'device_key' => $childKey]);
+                                            Log::info('Removed invalid token', ['email' => $email, 'device_key' => $childKey]);
                                         }
                                     }
                                 }
                             }
                         }
                     } catch (\Exception $e) {
-                        \Log::error('Error sending batch', [
+                        Log::error('Error sending batch', [
                             'email' => $email,
                             'batch_index' => $batchIndex,
                             'error' => $e->getMessage()
@@ -208,7 +209,7 @@ class NotificationHelper
                     }
                 }
                 
-                \Log::info('All batches processed', [
+                Log::info('All batches processed', [
                     'email' => $email,
                     'total_tokens' => count($tokens),
                     'total_success' => $totalSuccess,
@@ -235,7 +236,7 @@ class NotificationHelper
             ];
             
         } catch (\Throwable $e) {
-            \Log::error('Notification Helper Error: ' . $e->getMessage());
+            Log::error('Notification Helper Error: ' . $e->getMessage());
             return [
                 'success' => false,
                 'message' => 'Failed to send notifications',

@@ -11,14 +11,16 @@ class Setting extends Model
     protected $table = 'settings'; 
     protected $guarded = []; 
 
-    protected static $currency = [
+    /** @var list<string> */
+    protected static array $currency = [
         'BGN', 'BRL', 'CAD', 'CHF', 'CNY', 'CZK', 'DKK', 'EUR', 'GBP', 'HKD',
         'HRK', 'HUF', 'IDR', 'ILS', 'INR', 'ISK', 'JPY', 'KRW', 'MXN', 'MYR',
         'NOK', 'NZD', 'PHP', 'PLN', 'RON', 'RUB', 'SEK', 'SGD', 'THB', 'TRY',
         'USD', 'ZAR'
     ];
 
-    public static function getCurrencyCodes()
+    /** @return list<string> */
+    public static function getCurrencyCodes(): array
     {
         return self::$currency;
     }

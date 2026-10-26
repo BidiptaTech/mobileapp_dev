@@ -51,7 +51,7 @@ class PackagedAttraction extends Model
      * @param int|string $attractionId
      * @return \Illuminate\Database\Eloquent\Builder
      */
-    public static function findByAttractionId($attractionId)
+    public static function findByAttractionId(int|string $attractionId)
     {
         // Convert to string for consistent comparison
         $attractionId = (string) $attractionId;

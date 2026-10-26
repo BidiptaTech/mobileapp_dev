@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use App\Models\Order;
 use App\Models\Driver;
 use App\Models\Guide;
@@ -40,7 +42,6 @@ class AuthController extends Controller
             if (!$email || !$password) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Email and password are required',
                     'message' => 'Email and password are required',
                 ], 400);
             }
@@ -179,12 +180,12 @@ class AuthController extends Controller
                 $dmc = null;
             }
             // Debug: Check if guide_id exists
-            \Log::info('Guide ID: ' . ($guide->guide_id ?? 'NULL'));
-            \Log::info('Guide getKey(): ' . $guide->getKey());
+            Log::info('Guide ID: ' . ($guide->guide_id ?? 'NULL'));
+            Log::info('Guide getKey(): ' . $guide->getKey());
             
             // Debug: Check if guide_id exists
-            \Log::info('Guide ID: ' . ($guide->guide_id ?? 'NULL'));
-            \Log::info('Guide getKey(): ' . $guide->getKey());
+            Log::info('Guide ID: ' . ($guide->guide_id ?? 'NULL'));
+            Log::info('Guide getKey(): ' . $guide->getKey());
             
             // Generate Sanctum token
             $token = $guide->createToken('guide-token')->plainTextToken;
@@ -216,7 +217,7 @@ class AuthController extends Controller
     {
         try {
             $driver_id = $request->driver_id; // from middleware
-            $auth_user = auth()->user();
+            $auth_user = $request->user();
 
             if($auth_user->driver_id != $driver_id){
                 return response()->json([
@@ -230,7 +231,7 @@ class AuthController extends Controller
             $jobsheets = Jobsheet::select('jobsheet_id', 'driver_id', 'tour_id', 'order_id', 'vehicle_id', 'current_status','date', 'data', 'type', 'service_type', 'journey_time','driver_id')->whereNotNull('driver_id')
                 ->where('date', '=', today())
                 ->where('driver_id', $driver_id)
-                ->whereHas('tour', function($query) {
+                ->whereHas('tour', function (Builder $query) {
                     $query->whereIn('tour_status', ['Confirmed', 'Definite', 'Actual']);
                 })
                 ->get();
@@ -240,7 +241,7 @@ class AuthController extends Controller
                 ->values();
 
             // Add vehicle information to each jobsheet
-            $jobsheetsWithVehicles = $jobsheets->map(function ($jobsheet) {
+            $jobsheetsWithVehicles = $jobsheets->map(function (Jobsheet $jobsheet) {
                 $jobsheetData = $jobsheet->toArray();
                 
                 // Get order data if order_id exists
@@ -320,7 +321,7 @@ class AuthController extends Controller
                 $entryPortFields = $this->nullArrivalFields();
                 $exitPortFields = $this->nullDepartureFields();
 
-                $driverEntryPortJobsheet = $jobsheets->first(function ($jobsheet) use ($tourId) {
+                $driverEntryPortJobsheet = $jobsheets->first(function (Jobsheet $jobsheet) use ($tourId) {
                     return (int) $jobsheet->tour_id === (int) $tourId
                         && strtolower((string) $jobsheet->type) === 'entry_port';
                 });
@@ -328,7 +329,7 @@ class AuthController extends Controller
                     $entryPortFields = $this->getEntryPortArrivalFieldsFromBookingId($driverEntryPortJobsheet->order_id);
                 }
 
-                $driverExitPortJobsheet = $jobsheets->first(function ($jobsheet) use ($tourId) {
+                $driverExitPortJobsheet = $jobsheets->first(function (Jobsheet $jobsheet) use ($tourId) {
                     return (int) $jobsheet->tour_id === (int) $tourId
                         && strtolower((string) $jobsheet->type) === 'exit_port';
                 });
@@ -471,7 +472,7 @@ class AuthController extends Controller
     {
         try {
             $guide_id = $request->guide_id; // from middleware
-            $auth_user = auth()->user();
+            $auth_user = $request->user();
             if($auth_user->guide_id != $guide_id){
                 return response()->json([
                     'success' => false,
@@ -483,14 +484,14 @@ class AuthController extends Controller
             // Only include jobsheets where tour_status is Confirmed, Definite, or Actual
             $jobsheets = Jobsheet::select('jobsheet_id', 'tour_id', 'order_id', 'current_status','date', 'data', 'type', 'service_type', 'journey_time', 'guide_id')->whereNotNull('guide_id')
                 ->where('guide_id', $guide_id)->where('date', '=', today())
-                ->whereHas('tour', function($query) {
+                ->whereHas('tour', function (Builder $query) {
                     $query->whereIn('tour_status', ['Confirmed', 'Definite', 'Actual']);
                 })
                 ->get();
             
 
             // Add vehicle information and order details to each jobsheet
-            $guideJobsheets = $jobsheets->map(function ($jobsheet) {
+            $guideJobsheets = $jobsheets->map(function (Jobsheet $jobsheet) {
                 $jobsheetData = $jobsheet->toArray();
                 
                 // Get order data if order_id exists
@@ -675,7 +676,7 @@ class AuthController extends Controller
             // Get all rows with this email and pluck/merge all tour_id (each stored as JSON array e.g. [3385, 3384])
             $tourIds = Guest::where('email', $email)
                 ->pluck('tour_id')
-                ->flatMap(function ($tourId) {
+                ->flatMap(function (mixed $tourId) {
                     $decoded = is_array($tourId) ? $tourId : json_decode($tourId, true);
                     return is_array($decoded) ? $decoded : [];
                 })
@@ -689,16 +690,16 @@ class AuthController extends Controller
             $now = now();
             
             // Calculate tour counts based on check_in_time and check_out_time
-            $pastTours = $tours->filter(function ($tour) use ($now) {
+            $pastTours = $tours->filter(function (Tour $tour) use ($now) {
                 return $tour->check_out_time && $tour->check_out_time < $now;
             })->count();
             
-            $ongoingTours = $tours->filter(function ($tour) use ($now) {
+            $ongoingTours = $tours->filter(function (Tour $tour) use ($now) {
                 return $tour->check_in_time && $tour->check_out_time && 
                        $tour->check_in_time <= $now && $tour->check_out_time >= $now;
             })->count();
             
-            $upcomingTours = $tours->filter(function ($tour) use ($now) {
+            $upcomingTours = $tours->filter(function (Tour $tour) use ($now) {
                 return $tour->check_in_time && $tour->check_in_time > $now;
             })->count();
             
@@ -777,7 +778,7 @@ class AuthController extends Controller
                 ->orderBy('agent_id', 'desc')
                 ->get();
 
-            $agent = $agents->first(function ($candidate) use ($password) {
+            $agent = $agents->first(function (Agent $candidate) use ($password) {
                 return $this->passwordMatches($password, $candidate->password);
             });
 
@@ -868,7 +869,7 @@ class AuthController extends Controller
                 ->orderBy('userId', 'desc')
                 ->get();
 
-            $dmc = $dmcs->first(function ($candidate) use ($password) {
+            $dmc = $dmcs->first(function (User $candidate) use ($password) {
                 return $this->passwordMatches($password, $candidate->password);
             });
 
@@ -924,7 +925,7 @@ class AuthController extends Controller
             $now = now();
             
             // Decode tour_id JSON array
-            $tourIds = Guest::where('email', $guest->email)->pluck('tour_id')->flatMap(function ($tourId) {
+            $tourIds = Guest::where('email', $guest->email)->pluck('tour_id')->flatMap(function (mixed $tourId) {
             $decoded = is_array($tourId) ? $tourId : json_decode($tourId, true);
             return is_array($decoded) ? $decoded : [];
             })->unique()->values()->all();
@@ -955,7 +956,7 @@ class AuthController extends Controller
             $includeAirportDetails = in_array($status_type, ['ongoing', 'upcoming'], true);
             
             // Map over tours and get all orders for each tour
-            $toursWithOrders = $tours->map(function ($tour) use ($includeAirportDetails) {
+            $toursWithOrders = $tours->map(function (Tour $tour) use ($includeAirportDetails) {
                 // Get all orders for this tour (without the tour relationship to avoid duplication)
                 $agentId = $tour->agent_id;
                 $agent = Agent::select('agency_id')
@@ -1008,7 +1009,7 @@ class AuthController extends Controller
                     ->where('tour_id', $tour->tour_id)
                     ->get();
                 // Map orders to include hotel info
-                $orders = $orders->map(function ($order) {
+                $orders = $orders->map(function (Order $order) {
 
                     // Make sure data is decoded as array
                     $orderData = is_array($order->data) ? $order->data : json_decode($order->data, true);
@@ -1140,7 +1141,7 @@ class AuthController extends Controller
                                 $guide_languages = GuideLanguage::select('language')
                                     ->where('guide_id', $guide->guide_id)
                                     ->get();
-                                $guide_languages = $guide_languages->map(function ($language) {
+                                $guide_languages = $guide_languages->map(function (GuideLanguage $language) {
                                     return $language->language;
                                 });
                                 $order->languages = $guide_languages;
@@ -1161,7 +1162,7 @@ class AuthController extends Controller
                                 $guide_languages = GuideLanguage::select('language')
                                     ->where('guide_id', $guide->guide_id)
                                     ->get();
-                                $guide_languages = $guide_languages->map(function ($language) {
+                                $guide_languages = $guide_languages->map(function (GuideLanguage $language) {
                                     return $language->language;
                                 });
                                 $order->languages = $guide_languages;
@@ -1593,7 +1594,7 @@ class AuthController extends Controller
             
             // Query guests where tour_id array contains the jobsheet's tour_id
             // Handle both JSON array and direct value cases
-            $guestEmails = Guest::where(function($query) use ($tour_id) {
+            $guestEmails = Guest::where(function (Builder $query) use ($tour_id) {
                 // If tour_id is stored as JSON array, check if it contains the value
                 $query->whereJsonContains('tour_id', $tour_id)
                     ->orWhereJsonContains('tour_id', (string) $tour_id)
@@ -1601,7 +1602,7 @@ class AuthController extends Controller
                     ->orWhere('tour_id', $tour_id);
             })->pluck('email')->filter()->unique()->values()->toArray();
 
-            \Log::info('updateJobsheetStatus guest lookup', [
+            Log::info('updateJobsheetStatus guest lookup', [
                 'jobsheet_id' => $request->id,
                 'tour_id' => $tour_id,
                 'guest_email_count' => count($guestEmails),
@@ -1695,7 +1696,7 @@ class AuthController extends Controller
                 $commentsDecoded = json_decode($jobsheet->comments, true);
                 $commentsText = '';
                 if (is_array($commentsDecoded)) {
-                    $commentsText = implode(', ', array_map(function ($c) {
+                    $commentsText = implode(', ', array_map(function (mixed $c) {
                         return is_array($c) ? json_encode($c) : (string)$c;
                     }, $commentsDecoded));
                 } elseif (is_string($commentsDecoded)) {
@@ -1821,9 +1822,9 @@ class AuthController extends Controller
                     $dataPayload
                 );
 
-                \Log::info('Notification sent to guests', ['result' => $notificationResult]);
+                Log::info('Notification sent to guests', ['result' => $notificationResult]);
             } else {
-                \Log::info('Notification skipped: no guest emails found for tour', [
+                Log::info('Notification skipped: no guest emails found for tour', [
                     'jobsheet_id' => $request->id,
                     'tour_id' => $tour_id,
                 ]);
@@ -1953,7 +1954,7 @@ class AuthController extends Controller
             if (in_array($paramKey, ['dmc_id', 'dmcid'], true)) {
                 $dmcUser = User::query()
                     ->select('userId')
-                    ->where(function ($query) use ($tokenableId) {
+                    ->where(function (Builder $query) use ($tokenableId) {
                         $query->where('userId', $tokenableId)
                             ->orWhere('dmcId', $tokenableId);
                     })
@@ -1991,7 +1992,7 @@ class AuthController extends Controller
                 ], 404);
             }
 
-            $matchedToken = $tokenRows->first(function ($row) use ($tokenHash, $plainToken) {
+            $matchedToken = $tokenRows->first(function (object $row) use ($tokenHash, $plainToken) {
                 if (!is_string($row->token) || $row->token === '') {
                     return false;
                 }
@@ -2146,7 +2147,7 @@ class AuthController extends Controller
     /**
      * Helper function to determine user type based on model
      */
-    private function getUserType($user)
+    private function getUserType(object $user): string
     {
         $className = class_basename(get_class($user));
         
@@ -2248,7 +2249,7 @@ class AuthController extends Controller
         if($userType == 'driver'){
             try {
                 $driver_id = $request->driver_id; // from middleware
-                $auth_user = auth()->user();
+                $auth_user = $request->user();
     
                 if($auth_user->driver_id != $driver_id){
                     return response()->json([
@@ -2272,7 +2273,7 @@ class AuthController extends Controller
                 $jobsheets = Jobsheet::select('jobsheet_id', 'driver_id', 'tour_id', 'order_id', 'vehicle_id', 'current_status','date', 'data', 'type', 'service_type', 'journey_time','driver_id')->whereNotNull('driver_id')
                     ->where('date', '=', $dateToFilter)
                     ->where('driver_id', $driver_id)
-                    ->whereHas('tour', function($query) {
+                    ->whereHas('tour', function (Builder $query) {
                         $query->whereIn('tour_status', ['Confirmed', 'Definite', 'Actual']);
                     })
                     ->get();
@@ -2282,7 +2283,7 @@ class AuthController extends Controller
                     ->values();
     
                 // Add vehicle information to each jobsheet
-                $jobsheetsWithVehicles = $jobsheets->map(function ($jobsheet) {
+                $jobsheetsWithVehicles = $jobsheets->map(function (Jobsheet $jobsheet) {
                     $jobsheetData = $jobsheet->toArray();
                     
                     // Get order data if order_id exists
@@ -2455,7 +2456,7 @@ class AuthController extends Controller
         elseif($userType == 'guide'){
             try {
                 $guide_id = $request->guide_id; // from middleware
-                $auth_user = auth()->user();
+                $auth_user = $request->user();
                 if($auth_user->guide_id != $guide_id){
                     return response()->json([
                         'success' => false,
@@ -2477,13 +2478,13 @@ class AuthController extends Controller
                 // Only include jobsheets where tour_status is Confirmed, Definite, or Actual
                 $jobsheets = Jobsheet::select('jobsheet_id', 'tour_id', 'order_id', 'current_status','date', 'data', 'type', 'service_type', 'journey_time', 'guide_id')->whereNotNull('guide_id')
                     ->where('guide_id', $guide_id)->where('date', '=', $dateToFilter)
-                    ->whereHas('tour', function($query) {
+                    ->whereHas('tour', function (Builder $query) {
                         $query->whereIn('tour_status', ['Confirmed', 'Definite', 'Actual']);
                     })
                     ->get();
     
                 // Add vehicle information and order details to each jobsheet
-                $guideJobsheets = $jobsheets->map(function ($jobsheet) {
+                $guideJobsheets = $jobsheets->map(function (Jobsheet $jobsheet) {
                     $jobsheetData = $jobsheet->toArray();
                     
                     // Get order data if order_id exists
@@ -2684,7 +2685,7 @@ class AuthController extends Controller
             $bookingId,
             is_scalar($bookingId) ? (string) $bookingId : null,
             is_numeric($bookingId) ? (int) $bookingId : null,
-        ], fn ($value) => $value !== null && $value !== '')));
+        ], fn (mixed $value) => $value !== null && $value !== '')));
 
         return Order::query()
             ->select('data')
@@ -2810,9 +2811,9 @@ class AuthController extends Controller
             return [];
         }
 
-        $names = array_values(array_unique(array_filter(array_map(function ($name) {
+        $names = array_values(array_unique(array_filter(array_map(function (mixed $name) {
             return is_string($name) ? trim($name) : '';
-        }, $names), fn ($name) => $name !== '')));
+        }, $names), fn (mixed $name) => $name !== '')));
 
         return $names;
     }

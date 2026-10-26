@@ -171,7 +171,18 @@ class GuestController extends Controller
             return $profile;
         }
 
-         
+        $sectionKeys = [
+            'additionalInfo',
+            'addressDetails',
+            'contactInfo',
+            'emergencyContact',
+            'fullNameAndGender',
+            'healthInfo',
+            'passportDetails',
+            'paymentAndDocuments',
+            'preferences',
+            'travelSlamBook',
+        ];
 
         $flatProfile = [];
         foreach ($sectionKeys as $key) {
@@ -230,7 +241,7 @@ class GuestController extends Controller
             $fromPayload = [];
         }
 
-        $keptUrls = array_values(array_filter($fromPayload, function ($item) {
+        $keptUrls = array_values(array_filter($fromPayload, function (mixed $item) {
             return is_string($item) && $item !== '';
         }));
 

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -155,7 +156,7 @@ class SingleTourPackage extends Model
     /**
      * Scope for filtering by DMC.
      */
-    public function scopeForDmc($query, $dmcId)
+    public function scopeForDmc(Builder $query, int|string $dmcId)
     {
         return $query->where('dmc_id', $dmcId);
     }
@@ -163,7 +164,7 @@ class SingleTourPackage extends Model
     /**
      * Scope for filtering by status.
      */
-    public function scopeWithStatus($query, $status)
+    public function scopeWithStatus(Builder $query, string $status)
     {
         return $query->where('status', $status);
     }
@@ -171,7 +172,7 @@ class SingleTourPackage extends Model
     /**
      * Scope for filtering by date range.
      */
-    public function scopeDateRange($query, $startDate, $endDate)
+    public function scopeDateRange(Builder $query, string $startDate, string $endDate)
     {
         return $query->whereBetween('start_date', [$startDate, $endDate]);
     }
