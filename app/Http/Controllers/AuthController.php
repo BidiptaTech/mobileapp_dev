@@ -2355,6 +2355,26 @@ class AuthController extends Controller
                     $orderData = $firstOrder && $firstOrder->data
                         ? (is_string($firstOrder->data) ? json_decode($firstOrder->data, true) : $firstOrder->data)
                         : null;
+
+                    $entryPortFields = $this->nullArrivalFields();
+                    $exitPortFields = $this->nullDepartureFields();
+
+                    $driverEntryPortJobsheet = $jobsheets->first(function ($jobsheet) use ($tourId) {
+                        return (int) $jobsheet->tour_id === (int) $tourId
+                            && strtolower((string) $jobsheet->type) === 'entry_port';
+                    });
+                    if ($driverEntryPortJobsheet) {
+                        $entryPortFields = $this->getEntryPortArrivalFieldsFromBookingId($driverEntryPortJobsheet->order_id);
+                    }
+
+                    $driverExitPortJobsheet = $jobsheets->first(function ($jobsheet) use ($tourId) {
+                        return (int) $jobsheet->tour_id === (int) $tourId
+                            && strtolower((string) $jobsheet->type) === 'exit_port';
+                    });
+                    if ($driverExitPortJobsheet) {
+                        $exitPortFields = $this->getExitPortDepartureFieldsFromBookingId($driverExitPortJobsheet->order_id);
+                    }
+
                     if($orderData && isset($orderData[0])){
                         $share_status = null; // default
                         $guest_whatsapp_no = null;
@@ -2365,19 +2385,54 @@ class AuthController extends Controller
                             $share_status = $guest?->share_contact; // null-safe access
                             $guest_whatsapp_no = $guest?->whatsapp_no;
                         }
-                        $customer_info[$tourId] = [
+                        $customerInfo = [
                             'name' => $orderData[0]['fullName'] ?? '',
                             'email' => $orderData[0]['email'] ?? '',
                             'isContactShared' => $share_status,
-                            'phone' => $share_status == 1 ? $orderData[0]['phone'] : 'Not Shared',
+                            'phone' => $share_status == 1 ? ($orderData[0]['phone'] ?? '') : 'Not Shared',
                             'address' => $orderData[0]['address1'] ?? '',
                             'state' => $orderData[0]['state'] ?? '',
                             'zip' => $orderData[0]['zip'] ?? '',
                             'whatsapp_no' => $guest_whatsapp_no ?? ''
                         ];
+
+                        if ($driverEntryPortJobsheet) {
+                            $customerInfo['arrival_transport_type'] = $entryPortFields['arrival_transport_type'];
+                            $customerInfo['arrival_flight_no'] = $entryPortFields['arrival_flight_no'];
+                        }
+
+                        if ($driverExitPortJobsheet) {
+                            $customerInfo['departure_transport_type'] = $exitPortFields['departure_transport_type'];
+                            $customerInfo['departure_flight_no'] = $exitPortFields['departure_flight_no'];
+                        }
+
+                        $customer_info[$tourId] = $customerInfo;
                     }
                     else{
-                        $customer_info[$tourId] = null;
+                        $customerInfo = [
+                            'name' => null,
+                            'email' => null,
+                            'isContactShared' => null,
+                            'phone' => null,
+                            'address' => null,
+                            'state' => null,
+                            'zip' => null,
+                            'whatsapp_no' => null,
+                        ];
+
+                        if ($driverEntryPortJobsheet) {
+                            $customerInfo['arrival_transport_type'] = $entryPortFields['arrival_transport_type'];
+                            $customerInfo['arrival_flight_no'] = $entryPortFields['arrival_flight_no'];
+                        }
+
+                        if ($driverExitPortJobsheet) {
+                            $customerInfo['departure_transport_type'] = $exitPortFields['departure_transport_type'];
+                            $customerInfo['departure_flight_no'] = $exitPortFields['departure_flight_no'];
+                        }
+
+                        $customer_info[$tourId] = ($driverEntryPortJobsheet || $driverExitPortJobsheet)
+                            ? $customerInfo
+                            : null;
                     }
                 }
                 return response()->json([
@@ -2479,6 +2534,10 @@ class AuthController extends Controller
                     $orderData = $firstOrder && $firstOrder->data
                         ? (is_string($firstOrder->data) ? json_decode($firstOrder->data, true) : $firstOrder->data)
                         : null;
+
+                    // entry_port jobsheets are usually assigned to drivers, not guides — look up by tour + date
+                    $entryPortFields = $this->getEntryPortArrivalFieldsForTourFromJobsheet($tourId, $dateToFilter);
+
                     if($orderData && isset($orderData[0])){
                         $share_status = null; // default
                         $guest_whatsapp_no = null;
@@ -2499,11 +2558,24 @@ class AuthController extends Controller
                             'address' => $orderData[0]['address1'] ?? '',
                             'state' => $orderData[0]['state'] ?? '',
                             'zip' => $orderData[0]['zip'] ?? '',
-                            'whatsapp_no' => $guest_whatsapp_no ?? ''
+                            'whatsapp_no' => $guest_whatsapp_no ?? '',
+                            'arrival_transport_type' => $entryPortFields['arrival_transport_type'],
+                            'arrival_flight_no' => $entryPortFields['arrival_flight_no'],
                         ];
                     }
                     else{
-                        $customer_info[$tourId] = null;
+                        $customer_info[$tourId] = [
+                            'name' => null,
+                            'email' => null,
+                            'isContactShared' => null,
+                            'phone' => null,
+                            'address' => null,
+                            'state' => null,
+                            'zip' => null,
+                            'whatsapp_no' => null,
+                            'arrival_transport_type' => $entryPortFields['arrival_transport_type'],
+                            'arrival_flight_no' => $entryPortFields['arrival_flight_no'],
+                        ];
                     }
                 }
     
