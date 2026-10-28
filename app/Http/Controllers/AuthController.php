@@ -1027,21 +1027,161 @@ class AuthController extends Controller
                         $order->phone = $hotel?->phone ?? null;
                         $order->hotel_image = $hotel?->main_image ?? null;
                     }
-                    elseif($order->type == 'attraction' && !empty($orderData) && (isset($orderData[0]['AttractionId']) || isset($orderData[0]['attraction_id']))){
-                        $attractionId = $orderData[0]['AttractionId'] ?? $orderData[0]['attraction_id'];
-                        $attraction = Attraction::select('location', 'master_image', 'phone')
-                                    ->where('attraction_id', $attractionId)
-                                    ->first();
+                    
+
+                    elseif (
+                        $order->type === 'attraction' &&
+                        !empty($orderData) &&
+                        (
+                            isset($orderData[0]['AttractionId']) ||
+                            isset($orderData[0]['attraction_id'])
+                        )
+                    ) {
+                        $attractionId = $orderData[0]['AttractionId']
+                            ?? $orderData[0]['attraction_id'];
+                    
+                        // Fetch attraction details.
+                        $attraction = Attraction::select(
+                            'location',
+                            'master_image',
+                            'phone'
+                        )
+                            ->where('attraction_id', $attractionId)
+                            ->first();
+                    
                         $order->city = $attraction?->location ?? null;
                         $order->phone = $attraction?->phone ?? null;
-                        // Prefer uploaded files from orders.upload_files; fall back to attraction master image
+                    
+                        // Preserve existing uploaded-image priority.
                         $uploadFiles = $order->upload_files;
+                    
                         if (is_string($uploadFiles) && $uploadFiles !== '') {
                             $decodedUploads = json_decode($uploadFiles, true);
-                            $uploadFiles = (json_last_error() === JSON_ERROR_NONE) ? $decodedUploads : $uploadFiles;
+                    
+                            $uploadFiles = json_last_error() === JSON_ERROR_NONE
+                                ? $decodedUploads
+                                : $uploadFiles;
                         }
-                        $order->attraction_image = !empty($uploadFiles) ? $uploadFiles : ($attraction?->master_image ?? null);
+                    
+                        $order->attraction_image = !empty($uploadFiles)
+                            ? $uploadFiles
+                            : ($attraction?->master_image ?? null);
+                    
+                        // Work with the first attraction object in order.data.
+                        $attractionData = $orderData[0];
+                    
+                        /*
+                         * 1. VEHICLE IMAGE
+                         * transfer_options.vehicle_id -> vehicles.vehicle_id
+                         */
+                        if (
+                            isset($attractionData['transfer_options']) &&
+                            is_array($attractionData['transfer_options'])
+                        ) {
+                            $vehicleId = $attractionData['transfer_options']['vehicle_id']
+                                ?? null;
+                    
+                            if ($vehicleId !== null && $vehicleId !== '') {
+                                $vehicleImage = Vehicle::where('vehicle_id', $vehicleId)
+                                    ->value('image');
+                    
+                                $vehicleDetails =
+                                    $attractionData['transfer_options']['vehicle_details']
+                                    ?? [];
+                    
+                                if (!is_array($vehicleDetails)) {
+                                    $vehicleDetails = [];
+                                }
+                    
+                                $vehicleDetails['image'] = $vehicleImage;
+                    
+                                $attractionData['transfer_options']['vehicle_details']
+                                    = $vehicleDetails;
+                            }
+                        }
+                    
+                        /*
+                         * 2. DRIVER DETAILS
+                         * orders.booking_id -> jobsheets.order_id -> drivers.driver_id
+                         */
+                        $driverJobsheet = DB::table('jobsheets')
+    ->where('order_id', $order->booking_id)
+    ->whereNotNull('driver_id')
+    ->first();
+                    
+                        if ($driverJobsheet) {
+                            $driver = Driver::select(
+                                'name',
+                                'email',
+                                'phone',
+                                'driver_gender',
+                                'driver_age',
+                                'image'
+                            )
+                                ->where('driver_id', $driverJobsheet->driver_id)
+                                ->first();
+                    
+                            if ($driver) {
+                                $attractionData['driver_details'] = [
+                                    'name'          => $driver->name,
+                                    'email'         => $driver->email,
+                                    'phone'         => $driver->phone,
+                                    'driver_gender' => $driver->driver_gender,
+                                    'driver_age'    => $driver->driver_age,
+                                    'image'         => $driver->image,
+                                ];
+                            }
+                        }
+                    
+                        /*
+                         * 3. GUIDE DETAILS
+                         * orders.booking_id -> jobsheets.order_id -> guides.guide_id
+                         *
+                         * Intentionally no jobsheet type filter.
+                         */
+                        if (
+                            !empty($attractionData['guide_options']) &&
+                            is_array($attractionData['guide_options'])
+                        ) {
+                            $guideJobsheet = DB::table('jobsheets')
+    ->where('order_id', $order->booking_id)
+    ->whereNotNull('guide_id')
+    ->first();
+                    
+                            if ($guideJobsheet) {
+                                $guide = Guide::select(
+                                    'name',
+                                    'email',
+                                    'contact_no',
+                                    'guide_gender',
+                                    'guide_age',
+                                    'image'
+                                )
+                                    ->where('guide_id', $guideJobsheet->guide_id)
+                                    ->first();
+                    
+                                if ($guide) {
+                                    $attractionData['guide_options'] = array_merge(
+                                        $attractionData['guide_options'],
+                                        [
+                                            'name'         => $guide->name,
+                                            'email'        => $guide->email,
+                                            'contact_no'   => $guide->contact_no,
+                                            'guide_gender' => $guide->guide_gender,
+                                            'guide_age'    => $guide->guide_age,
+                                            'image'        => $guide->image,
+                                        ]
+                                    );
+                                }
+                            }
+                        }
+                    
+                        // Save the enriched object back into order.data.
+                        $orderData[0] = $attractionData;
+                        $order->data = $orderData;
                     }
+                    
+
                     elseif(($order->type == 'travel_point' || $order->type == 'entry_port' || $order->type == 'exit_port' || $order->type == 'travel_hourly' || $order->type == 'local_transport') && !empty($orderData)){
                         // Get vehicle_id and driver_id from jobsheet table for this specific order
                         $jobsheet = DB::table('jobsheets')
@@ -1114,15 +1254,142 @@ class AuthController extends Controller
 
                         $order->status = $this->resolveJobsheetStatus($jobsheet);
                     }
-                    elseif($order->type == 'restaurant' && !empty($orderData) && isset($orderData[0]['restaurantId'])){
+                    
+
+                    elseif (
+                        $order->type === 'restaurant' &&
+                        !empty($orderData) &&
+                        isset($orderData[0]['restaurantId'])
+                    ) {
                         $restaurantId = $orderData[0]['restaurantId'];
-                        $restaurant = Restaurant::select('city', 'master_image', 'phone')
-                                    ->where('restaurant_id', $restaurantId)
-                                    ->first();
+                    
+                        // Fetch restaurant details.
+                        $restaurant = Restaurant::select(
+                            'city',
+                            'master_image',
+                            'phone'
+                        )
+                            ->where('restaurant_id', $restaurantId)
+                            ->first();
+                    
                         $order->city = $restaurant?->city ?? null;
                         $order->phone = $restaurant?->phone ?? null;
                         $order->restaurant_image = $restaurant?->master_image ?? null;
+                    
+                        // Work with the first restaurant object in order.data.
+                        $restaurantData = $orderData[0];
+                    
+                        /*
+                         * 1. VEHICLE IMAGE
+                         * transfer_options.vehicle_id -> vehicles.vehicle_id
+                         */
+                        if (
+                            isset($restaurantData['transfer_options']) &&
+                            is_array($restaurantData['transfer_options'])
+                        ) {
+                            $vehicleId = $restaurantData['transfer_options']['vehicle_id']
+                                ?? null;
+                    
+                            if ($vehicleId !== null && $vehicleId !== '') {
+                                $vehicleImage = Vehicle::where('vehicle_id', $vehicleId)
+                                    ->value('image');
+                    
+                                $vehicleDetails =
+                                    $restaurantData['transfer_options']['vehicle_details']
+                                    ?? [];
+                    
+                                if (!is_array($vehicleDetails)) {
+                                    $vehicleDetails = [];
+                                }
+                    
+                                $vehicleDetails['image'] = $vehicleImage;
+                    
+                                $restaurantData['transfer_options']['vehicle_details']
+                                    = $vehicleDetails;
+                            }
+                        }
+                    
+                        /*
+                         * 2. DRIVER DETAILS
+                         * orders.booking_id -> jobsheets.order_id -> drivers.driver_id
+                         */
+                        $driverJobsheet = DB::table('jobsheets')
+    ->where('order_id', $order->booking_id)
+    ->whereNotNull('driver_id')
+    ->first();
+                    
+                        if ($driverJobsheet) {
+                            $driver = Driver::select(
+                                'name',
+                                'email',
+                                'phone',
+                                'driver_gender',
+                                'driver_age',
+                                'image'
+                            )
+                                ->where('driver_id', $driverJobsheet->driver_id)
+                                ->first();
+                    
+                            if ($driver) {
+                                $restaurantData['driver_details'] = [
+                                    'name'          => $driver->name,
+                                    'email'         => $driver->email,
+                                    'phone'         => $driver->phone,
+                                    'driver_gender' => $driver->driver_gender,
+                                    'driver_age'    => $driver->driver_age,
+                                    'image'         => $driver->image,
+                                ];
+                            }
+                        }
+                    
+                        /*
+                         * 3. GUIDE DETAILS
+                         * orders.booking_id -> jobsheets.order_id -> guides.guide_id
+                         *
+                         * Intentionally no jobsheet type filter.
+                         */
+                        if (
+                            !empty($restaurantData['guide_options']) &&
+                            is_array($restaurantData['guide_options'])
+                        ) {
+                            $guideJobsheet = DB::table('jobsheets')
+    ->where('order_id', $order->booking_id)
+    ->whereNotNull('guide_id')
+    ->first();
+                    
+                            if ($guideJobsheet) {
+                                $guide = Guide::select(
+                                    'name',
+                                    'email',
+                                    'contact_no',
+                                    'guide_gender',
+                                    'guide_age',
+                                    'image'
+                                )
+                                    ->where('guide_id', $guideJobsheet->guide_id)
+                                    ->first();
+                    
+                                if ($guide) {
+                                    $restaurantData['guide_options'] = array_merge(
+                                        $restaurantData['guide_options'],
+                                        [
+                                            'name'         => $guide->name,
+                                            'email'        => $guide->email,
+                                            'contact_no'   => $guide->contact_no,
+                                            'guide_gender' => $guide->guide_gender,
+                                            'guide_age'    => $guide->guide_age,
+                                            'image'        => $guide->image,
+                                        ]
+                                    );
+                                }
+                            }
+                        }
+                    
+                        // Save the enriched object back into order.data.
+                        $orderData[0] = $restaurantData;
+                        $order->data = $orderData;
                     }
+                    
                     elseif($order->type == 'guide' && !empty($orderData)){
                         // Get guide_id from jobsheet table for this specific order
                         $jobsheet = DB::table('jobsheets')
